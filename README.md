@@ -32,13 +32,6 @@ This project aims to implement and analyze various hyperbolic discounting models
 2. **Install dependencies:** (List any required Python packages here - e.g., NumPy, SciPy, Matplotlib)
 3. **Run the code:**  (Provide examples of how to run the scripts or use the implemented functions)
 
-**Contributing:**
-
-Contributions are welcome! Feel free to open issues for bug reports or feature requests. Pull requests are encouraged for code improvements and new features.
-
-**License:**
-
-(Choose a license for your project - e.g., MIT License)
 
 **Author:**
 
