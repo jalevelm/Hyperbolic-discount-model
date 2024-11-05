@@ -6,7 +6,7 @@ from mesa.datacollection import DataCollector
 import random
 import numpy as np
 import matplotlib.pyplot as plt
-import scipy.optimize as optimize  # This line imports a tool for finding the best solution to a problem
+import scipy.optimize as optimize  
 
 
 class SavingAgent(Agent):
@@ -42,14 +42,27 @@ class SavingAgent(Agent):
         interest_rate = self.model.interest_rate  
         R_star = 1 + (1 - self.delta) / (self.beta * self.delta)
 
+         # Simplified saving decision based on R_star (to define initial conditions for optimization)
+        if interest_rate > R_star:  
+            # Save a portion of wealth
+            preliminary_save_amount = self.wealth * (interest_rate - R_star) / 2    # Calculate preliminary_save_amount
+            self.wealth += preliminary_save_amount  # Update wealth based on the preliminary save amount
+            self.savings = preliminary_save_amount  # Store preliminary savings
+        else:
+            # Disave a portion of wealth, but prevent negative wealth
+            disave_amount = min(self.wealth, self.wealth * (R_star - interest_rate) / 2)  # Limit dissaving to current wealth
+            self.wealth -= disave_amount  # Subtract disave_amount from wealth
+            self.savings = -disave_amount # Store dissavings as negative savings
 
-# Optimization: This is where the agent decides how much to save
+
+
+        # Optimization: This is where the agent decides how much to save
         # It uses a phyton tool called 'optimize.minimize_scalar' to find the best savings amount
         # This tool tries different savings amounts and calculates the "lifetime utility" for each one
         # "Lifetime utility" is like a score for how happy/satisfied the agent is with their spending and saving over their entire life
         # The tool finds the savings amount that gives the highest "lifetime utility" score
         result = optimize.minimize_scalar(
-            lambda savings: -self.calculate_lifetime_utility(savings),  # Negative for maximization (because the tool is designed to find the minimum, we use a negative sign to make it find the maximum)
+            lambda savings: -self.calculate_lifetime_utility(savings),  # Negative for maximization (because the tool is designed to find the minimum, a negative sign is used to make it find the maximum)
             bounds=(0, self.wealth),  # Savings cannot exceed wealth (the agent can't save more money than they have)
             method='bounded'  # This tells the tool to only look for solutions within the allowed bounds
         )
@@ -67,7 +80,7 @@ class SavingAgent(Agent):
         total_lifetime_utility = 0  # Initialize total utility
         current_wealth = self.wealth  # Start with the agent's current wealth
 
-        # Calculate utility for a certain number of periods (e.g., 240 months)
+        # Calculate utility for a certain number of periods (e.g., 120 months)
         for t in range(120):  
             consumption = current_wealth - savings  # Calculate consumption for the current period
             
