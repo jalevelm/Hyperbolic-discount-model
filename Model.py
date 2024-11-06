@@ -39,6 +39,7 @@ class SavingAgent(Agent):
         Define the agent's actions in each time step.
         """
         # Calculate threshold R* (using global interest_rate)
+        """
         interest_rate = self.model.interest_rate  
         R_star = 1 + (1 - self.delta) / (self.beta * self.delta)
 
@@ -52,7 +53,7 @@ class SavingAgent(Agent):
             # Disave a portion of wealth, but prevent negative wealth
             disave_amount = min(self.wealth, self.wealth * (R_star - interest_rate) / 2)  # Limit dissaving to current wealth
             self.wealth -= disave_amount  # Subtract disave_amount from wealth
-            self.savings = -disave_amount # Store dissavings as negative savings
+            self.savings = -disave_amount # Store dissavings as negative savings"""
 
 
 
