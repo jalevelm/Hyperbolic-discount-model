@@ -38,24 +38,6 @@ class SavingAgent(Agent):
         """
         Define the agent's actions in each time step.
         """
-        # Calculate threshold R* (using global interest_rate)
-        """
-        interest_rate = self.model.interest_rate  
-        R_star = 1 + (1 - self.delta) / (self.beta * self.delta)
-
-         # Simplified saving decision based on R_star (to define initial conditions for optimization)
-        if interest_rate > R_star:  
-            # Save a portion of wealth
-            preliminary_save_amount = self.wealth * (interest_rate - R_star) / 2    # Calculate preliminary_save_amount
-            self.wealth += preliminary_save_amount  # Update wealth based on the preliminary save amount
-            self.savings = preliminary_save_amount  # Store preliminary savings
-        else:
-            # Disave a portion of wealth, but prevent negative wealth
-            disave_amount = min(self.wealth, self.wealth * (R_star - interest_rate) / 2)  # Limit dissaving to current wealth
-            self.wealth -= disave_amount  # Subtract disave_amount from wealth
-            self.savings = -disave_amount # Store dissavings as negative savings"""
-
-
 
         # Optimization: This is where the agent decides how much to save
         # It uses a phyton tool called 'optimize.minimize_scalar' to find the best savings amount
