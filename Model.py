@@ -13,7 +13,7 @@ class SavingAgent(Agent):
     """
     An agent with hyperbolic discounting preferences, making saving decisions.
     """
-    def __init__(self, unique_id, model, beta, delta, init_wealth, salary, sigma):
+    def __init__(self, unique_id, model, beta, delta, init_wealth, sigma):
         """
         Initialize a new agent.
 
@@ -30,7 +30,6 @@ class SavingAgent(Agent):
         self.beta = beta
         self.delta = delta
         self.wealth = init_wealth  # Initialize with the first "salary"
-        self.salary = salary
         self.sigma = sigma
         self.savings = 0 
 
@@ -51,9 +50,8 @@ class SavingAgent(Agent):
         )
         self.savings = result.x  # Optimal savings (the best savings amount is stored in 'result.x', and we save it as the agent's savings)
 
-        # Update wealth: This part updates the agent's wealth after saving and earning income
+        # Update wealth: This part updates the agent's wealth after saving 
         self.wealth -= self.savings  # Subtract savings from wealth (the agent has less money now because they saved some)
-        self.wealth += self.salary   # Add salary to wealth (the agent earns money from their job)
 
     
     def calculate_lifetime_utility(self, savings):
@@ -84,7 +82,7 @@ class SavingModel(Model):
     """
     A model with multiple saving agents.
     """
-    def __init__(self, N, width, height, interest_rate, sigma, beta_ranges, delta_ranges, salary_dist):
+    def __init__(self, N, width, height, interest_rate, sigma, beta_ranges, delta_ranges, wealth_dist):
         """
         Initialize the model.
 
@@ -111,18 +109,17 @@ class SavingModel(Model):
             beta = random.choice(np.arange(beta_ranges[0], beta_ranges[1] + 0.1, 0.1)) 
             delta = random.choice(np.arange(delta_ranges[0], delta_ranges[1] + 0.1, 0.1)) 
 
-            # Sample salary based on distribution
+            # Sample initial wealth based on distribution
             rand_num = random.random()
             cumulative_prob = 0
-            for prob, salary_range in salary_dist:  
+            for prob, wealth_range in wealth_dist:  
                 cumulative_prob += prob
                 if rand_num <= cumulative_prob:
-                    salary = random.randint(salary_range[0], salary_range[1])
-                    init_wealth = salary  # Set initial wealth equal to salary
+                    init_wealth = random.randint(wealth_range[0], wealth_range[1])
                     break
 
             # Create the agent with the chosen parameters
-            a = SavingAgent(i, self, beta, delta, init_wealth, salary, sigma)
+            a = SavingAgent(i, self, beta, delta, init_wealth, sigma)
             self.schedule.add(a)
 
              # Place the agent at a random location on the grid
@@ -155,16 +152,17 @@ sigma = 0.8 # Example risk aversion parameter
 beta_ranges = (0.1, 1)  # Beta range from 0 to 1
 delta_ranges = (0.1, 0.9)  # Delta range from 0 to 0.9
 
-# Example wealth and salary distribution (replace with your data)
-wealth_salary_dist = [
-    (0.037, (22404, 32000)),  
-    (0.082, (14936, 22403)),  
-    (0.318, (7468, 14935)),  
-    (0.563, (0, 7468))   
+# Initial wealth distribution 
+wealth_dist = [
+    (0.41520521, (0, 10000)),  # Less than 10,000 USD
+    (0.477205824, (10000, 100000)),  # Between 10,000 and 100,000 USD
+    (0.103122194, (100000, 1000000)),  # Between 100,000 and 1,000,000 USD
+    (0.004466772, (1000000, 10000000))  # More than 1,000,000 USD 
 ]
 
+
 # Create a model instance with the specified parameters
-model = SavingModel(N, width, height, interest_rate, sigma, beta_ranges, delta_ranges, wealth_salary_dist)
+model = SavingModel(N, width, height, interest_rate, sigma, beta_ranges, delta_ranges, wealth_dist)
 
 # Run the model
 for i in range(120):  # Run for 120 months (10 years)
