@@ -29,7 +29,7 @@ class SavingAgent(Agent):
         super().__init__(unique_id, model)
         self.beta = beta
         self.delta = delta
-        self.wealth = init_wealth  # Initialize with the first "salary"
+        self.wealth = init_wealth  
         self.sigma = sigma
         self.savings = 0 
 
@@ -38,42 +38,37 @@ class SavingAgent(Agent):
         Define the agent's actions in each time step.
         """
 
-        # Optimization: This is where the agent decides how much to save
-        # It uses a phyton tool called 'optimize.minimize_scalar' to find the best savings amount
-        # This tool tries different savings amounts and calculates the "lifetime utility" for each one
-        # "Lifetime utility" is like a score for how happy/satisfied the agent is with their spending and saving over their entire life
-        # The tool finds the savings amount that gives the highest "lifetime utility" score
-        result = optimize.minimize_scalar(
-            lambda savings: -self.calculate_lifetime_utility(savings),  # Negative for maximization (because the tool is designed to find the minimum, a negative sign is used to make it find the maximum)
-            bounds=(0, self.wealth),  # Savings cannot exceed wealth (the agent can't save more money than they have)
-            method='bounded'  # This tells the tool to only look for solutions within the allowed bounds
-        )
-        self.savings = result.x  # Optimal savings (the best savings amount is stored in 'result.x', and we save it as the agent's savings)
+        # Discretize possible wealth levels
+        wealth_grid = np.linspace(0, self.model.max_wealth, 100)  # Adjust grid size as needed
 
-        # Update wealth: This part updates the agent's wealth after saving 
-        self.wealth -= self.savings  # Subtract savings from wealth (the agent has less money now because they saved some)
+        # Initialize value function and saving function
+        V = np.zeros_like(wealth_grid)
+        g = np.zeros_like(wealth_grid)
+
+        # Value iteration and policy improvement
+        for _ in range(100):  # Adjust number of iterations as needed
+            V_old = V.copy()
+            for i, k in enumerate(wealth_grid):
+                possible_savings = np.linspace(0, k, 50)  # Adjust grid size as needed
+                V_next = [self.utility(k - s) + self.delta * V_old[np.argmin(np.abs(wealth_grid - s))] for s in possible_savings]
+                V[i] = np.max(V_next)
+                g[i] = possible_savings[np.argmax(V_next)]
+
+        # Find optimal savings for current wealth
+        self.savings = g[np.argmin(np.abs(wealth_grid - self.wealth))]
+
+        # Update wealth
+        self.wealth -= self.savings
 
     
-    def calculate_lifetime_utility(self, savings):
+    def utility(self, consumption):
         """
-        Calculate the agent's lifetime utility given a savings amount.
+        Calculate utility for a given consumption level.
         """
-        total_lifetime_utility = 0  # Initialize total utility
-        current_wealth = self.wealth  # Start with the agent's current wealth
-
-        # Calculate utility for a certain number of periods (e.g., 120 months)
-        for t in range(120):  
-            consumption = current_wealth - savings  # Calculate consumption for the current period
-            
-            # Calculate the discounted utility for the current period
-            discounted_utility = self.beta * (self.delta ** t) * (consumption ** (1 - self.sigma) / (1 - self.sigma))  
-
-            total_lifetime_utility += discounted_utility  # Add the discounted utility to the total
-
-            # Update current_wealth for the next period
-            current_wealth = (current_wealth - consumption) * (1 + self.model.interest_rate / 12)  # Assuming monthly interest
-
-        return total_lifetime_utility
+        if self.sigma == 1:
+            return np.log(consumption)
+        else:
+            return consumption**(1 - self.sigma) / (1 - self.sigma)
 
 
 
@@ -94,14 +89,15 @@ class SavingModel(Model):
             sigma: Risk aversion parameter (same for all agents in this version).
             beta_ranges: Tuple (min, max) for the range of beta values for agents.
             delta_ranges: Tuple (min, max) for the range of delta values for agents.
-            salary_dist: A list of tuples defining the salary distribution.
-                         Each tuple is (probability, (min_salary, max_salary)).
+            wealth_dist: A list of tuples defining the initial wealth distribution.
+                         Each tuple is (probability, (min_wealth, max_wealth)).
         """
         self.num_agents = N
         self.grid = MultiGrid(width, height, True)  # Torus grid
         self.schedule = RandomActivation(self)
         self.interest_rate = interest_rate
         self.sigma = sigma
+        self.max_wealth = 10000000  # Adjust as needed
 
         # Create agents
         for i in range(self.num_agents):
@@ -154,9 +150,9 @@ delta_ranges = (0.1, 0.9)  # Delta range from 0 to 0.9
 
 # Initial wealth distribution 
 wealth_dist = [
-    (0.41520521, (0, 10000)),  # Less than 10,000 USD
-    (0.477205824, (10000, 100000)),  # Between 10,000 and 100,000 USD
-    (0.103122194, (100000, 1000000)),  # Between 100,000 and 1,000,000 USD
+    (0.41520521, (0, 9999)),  # Less than 10,000 USD
+    (0.477205824, (10000, 99999)),  # Between 10,000 and 100,000 USD
+    (0.103122194, (100000, 999999)),  # Between 100,000 and 1,000,000 USD
     (0.004466772, (1000000, 10000000))  # More than 1,000,000 USD 
 ]
 
