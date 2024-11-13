@@ -7,11 +7,12 @@ import random
 import numpy as np
 import matplotlib.pyplot as plt
 import scipy.optimize as optimize  
+from joblib import Parallel, delayed
 
 
 class SavingAgent(Agent):
     """
-    An agent with hyperbolic discounting preferences, making saving decisions.
+    An agent with hyperbolic discounting preferences, making saving decisions
     """
     def __init__(self, unique_id, model, beta, delta, init_wealth, sigma):
         """
@@ -46,13 +47,13 @@ class SavingAgent(Agent):
         g = np.zeros_like(wealth_grid)
 
         # Value iteration and policy improvement
-        for _ in range(100):  # Adjust number of iterations as needed
+        for _ in range(10):  # Adjust number of iterations as needed
             V_old = V.copy()
-            for i, k in enumerate(wealth_grid):
-                possible_savings = np.linspace(0, k, 50)  # Adjust grid size as needed
-                V_next = [self.utility(k - s) + self.delta * V_old[np.argmin(np.abs(wealth_grid - s))] for s in possible_savings]
-                V[i] = np.max(V_next)
-                g[i] = possible_savings[np.argmax(V_next)]
+
+            # Parallelize the loop over wealth_grid
+            results = Parallel(n_jobs=-1)(delayed(self.optimize_savings)(k, V_old, self.model.max_wealth) for k in wealth_grid)
+            V = np.array([result[0] for result in results])
+            g = np.array([result[1] for result in results])
 
         # Find optimal savings for current wealth
         self.savings = g[np.argmin(np.abs(wealth_grid - self.wealth))]
@@ -60,7 +61,6 @@ class SavingAgent(Agent):
         # Update wealth
         self.wealth -= self.savings
 
-    
     def utility(self, consumption):
         """
         Calculate utility for a given consumption level.
@@ -69,8 +69,15 @@ class SavingAgent(Agent):
             return np.log(consumption)
         else:
             return consumption**(1 - self.sigma) / (1 - self.sigma)
+    
+    def optimize_savings(self, k, V_old, max_wealth):
+        possible_savings = np.linspace(0, k, 50)  # Adjust grid size as needed
 
+        # Vectorized calculation of V_next
+        consumption = k - possible_savings  # Calculate consumption for all possible savings
+        V_next = self.utility(consumption) + self.delta * V_old[np.argmin(np.abs(wealth_grid - possible_savings[:, np.newaxis]), axis=1)]  # Calculate the value function for all possible savings
 
+        return np.max(V_next), possible_savings[np.argmax(V_next)]  # Return the maximum value and the corresponding saving amount
 
 
 class SavingModel(Model):
