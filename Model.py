@@ -40,7 +40,7 @@ class SavingAgent(Agent):
         """
 
         # Discretize possible wealth levels
-        wealth_grid = np.linspace(0, self.model.max_wealth, 100)  # Adjust grid size as needed
+        wealth_grid = np.linspace(0, self.model.max_wealth, 10)  # Adjust grid size as needed
 
         # Initialize value function and saving function
         V = np.zeros_like(wealth_grid)
@@ -51,7 +51,7 @@ class SavingAgent(Agent):
             V_old = V.copy()
 
             # Parallelize the loop over wealth_grid
-            results = Parallel(n_jobs=-1)(delayed(self.optimize_savings)(k, V_old, self.model.max_wealth) for k in wealth_grid)
+            results = Parallel(n_jobs=-1)(delayed(self.optimize_savings)(k, V_old, self.model.max_wealth, wealth_grid) for k in wealth_grid)
             V = np.array([result[0] for result in results])
             g = np.array([result[1] for result in results])
 
@@ -70,8 +70,8 @@ class SavingAgent(Agent):
         else:
             return consumption**(1 - self.sigma) / (1 - self.sigma)
     
-    def optimize_savings(self, k, V_old, max_wealth):
-        possible_savings = np.linspace(0, k, 50)  # Adjust grid size as needed
+    def optimize_savings(self, k, V_old, max_wealth, wealth_grid):
+        possible_savings = np.linspace(0, k, 5)  # Adjust grid size as needed
 
         # Vectorized calculation of V_next
         consumption = k - possible_savings  # Calculate consumption for all possible savings
@@ -145,7 +145,7 @@ class SavingModel(Model):
         self.schedule.step()
 
 # Example usage
-N = 100  # Number of agents
+N = 10  # Number of agents
 width = 10
 height = 10
 interest_rate = 0.1  # Annual interest rate
@@ -168,7 +168,7 @@ wealth_dist = [
 model = SavingModel(N, width, height, interest_rate, sigma, beta_ranges, delta_ranges, wealth_dist)
 
 # Run the model
-for i in range(120):  # Run for 120 months (10 years)
+for i in range(12):  # Run for X months 
     model.step()
 
 # Analyze data
