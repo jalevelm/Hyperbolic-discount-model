@@ -148,12 +148,12 @@ class SavingModel(Model):
 N = 10  # Number of agents
 width = 10
 height = 10
-interest_rate = 0.1  # Annual interest rate
+interest_rate = 0.2  # Annual interest rate
 sigma = 0.8 # Example risk aversion parameter
 
 # Example usage with ranges for beta and delta
-beta_ranges = (0.1, 1)  # Beta range from 0 to 1
-delta_ranges = (0.1, 0.9)  # Delta range from 0 to 0.9
+beta_ranges = (0.9, 1)  # Beta range from 0 to 1
+delta_ranges = (0.9, 1)  # Delta range from 0 to 0.9
 
 # Initial wealth distribution 
 wealth_dist = [
