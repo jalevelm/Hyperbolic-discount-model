@@ -135,6 +135,8 @@ class SavingModel(Model):
             model_reporters={"Average_Wealth": lambda m: np.mean([a.wealth for a in m.schedule.agents]),
                              "Average_Savings": lambda m: np.mean([a.savings for a in m.schedule.agents])},  # Collect average savings
             agent_reporters={"Wealth": "wealth", "Savings": "savings"}  # Collect individual savings
+
+        
         )
 
     def step(self):
@@ -144,16 +146,16 @@ class SavingModel(Model):
         self.datacollector.collect(self)
         self.schedule.step()
 
-# Example usage
+#_____________________________________________________________________ Example usage_______________________________________________________________________________
 N = 10  # Number of agents
 width = 10
 height = 10
-interest_rate = 0.2  # Annual interest rate
-sigma = 0.8 # Example risk aversion parameter
+interest_rate = 0.3  # Annual interest rate
+sigma = 0.9 # Example risk aversion parameter
 
 # Example usage with ranges for beta and delta
 beta_ranges = (0.9, 1)  # Beta range from 0 to 1
-delta_ranges = (0.9, 1)  # Delta range from 0 to 0.9
+delta_ranges = (0.1, 0.2)  # Delta range from 0 to 0.9
 
 # Initial wealth distribution 
 wealth_dist = [
@@ -174,11 +176,32 @@ for i in range(12):  # Run for X months
 # Analyze data
 agent_data = model.datacollector.get_agent_vars_dataframe()
 model_data = model.datacollector.get_model_vars_dataframe()
+agent_data = model.datacollector.get_agent_vars_dataframe()  # Get individual agent data
 
 # Plot average wealth over time
 plt.plot(model_data["Average_Wealth"], label="Average Wealth")
 plt.plot(model_data["Average_Savings"], label="Average Savings")  # Plot average savings
 plt.xlabel("Time (months)")
 plt.ylabel("Amount")
+plt.legend()
+plt.show()
+
+# Plot individual agent wealth
+plt.figure()
+for agent_id, agent_df in agent_data.groupby("AgentID"):
+    plt.plot(np.ravel(agent_df["Wealth"]), label=f"Agent {agent_id}")
+plt.xlabel("Time (months)")
+plt.ylabel("Wealth")
+plt.title("Individual Agent Wealth Over Time")
+plt.legend()
+plt.show()
+
+# Plot individual agent savings
+plt.figure()
+for agent_id, agent_df in agent_data.groupby("AgentID"):
+    plt.plot(np.ravel(agent_df["Savings"]), label=f"Agent {agent_id}")
+plt.xlabel("Time (months)")
+plt.ylabel("Savings")
+plt.title("Individual Agent Savings Over Time")
 plt.legend()
 plt.show()
