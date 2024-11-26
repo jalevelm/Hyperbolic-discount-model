@@ -42,6 +42,13 @@ class SavingAgent(Agent):
         # Discretize possible wealth levels
         wealth_grid = np.linspace(0, self.model.max_wealth, 10)  # Adjust grid size as needed
 
+        # Calculate the threshold interest rate, R_star 
+        self.R_star = 1 + (1 - self.delta) / (self.beta * self.delta)
+
+         # Print global R and agent's R_star
+        print(f"Agent {self.unique_id}: Global R = {self.model.interest_rate}, R* = {self.R_star}")
+
+
         # Initialize value function and saving function
         V = np.zeros_like(wealth_grid)
         g = np.zeros_like(wealth_grid)
@@ -71,7 +78,31 @@ class SavingAgent(Agent):
             return consumption**(1 - self.sigma) / (1 - self.sigma)
     
     def optimize_savings(self, k, V_old, max_wealth, wealth_grid):
-        possible_savings = np.linspace(0, k, 5)  # Adjust grid size as needed
+        """
+    Calculate the optimal savings amount.
+
+    Args:
+        k: Current wealth level.
+        V_old: Value function from the previous iteration.
+        max_wealth: Maximum wealth level in the model.
+        wealth_grid: Discretized wealth grid.
+
+    Returns:
+        tuple: (maximum value, corresponding saving amount)
+        """
+        #possible_savings = np.linspace(0, k, 5)  # Adjust grid size as needed
+
+         # Calculate R_star for the agent
+        R_star = 1 + (1 - self.delta) / (self.beta * self.delta)
+
+        # Adjust the range of possible savings based on the relationship 
+        # between the model's interest rate and the agent's R_star
+        if self.model.interest_rate > R_star:
+            # Agent has a natural inclination to save
+            possible_savings = np.linspace(0, k, 5)  # Adjust grid size as needed
+        else:
+            # Agent has a natural inclination to dis-save
+            possible_savings = np.linspace(-k, k, 5)  # Adjust grid size as needed
 
         # Vectorized calculation of V_next
         consumption = k - possible_savings  # Calculate consumption for all possible savings
@@ -109,8 +140,8 @@ class SavingModel(Model):
         # Create agents
         for i in range(self.num_agents):
             # Sample beta and delta from ranges
-            beta = random.choice(np.arange(beta_ranges[0], beta_ranges[1] + 0.1, 0.1)) 
-            delta = random.choice(np.arange(delta_ranges[0], delta_ranges[1] + 0.1, 0.1)) 
+            beta = random.choice(np.arange(beta_ranges[0], beta_ranges[1] + 0.01, 0.01)) 
+            delta = random.choice(np.arange(delta_ranges[0], delta_ranges[1] + 0.01, 0.01)) 
 
             # Sample initial wealth based on distribution
             rand_num = random.random()
@@ -150,12 +181,12 @@ class SavingModel(Model):
 N = 10  # Number of agents
 width = 10
 height = 10
-interest_rate = 0.3  # Annual interest rate
-sigma = 0.9 # Example risk aversion parameter
+interest_rate = 0.1  # Annual interest rate
+sigma = 0.4387 # Example risk aversion parameter
 
 # Example usage with ranges for beta and delta
-beta_ranges = (0.9, 1)  # Beta range from 0 to 1
-delta_ranges = (0.1, 0.2)  # Delta range from 0 to 0.9
+beta_ranges = (0.70, 1)  # Beta range 
+delta_ranges = (0.95, 1)  # Delta range 
 
 # Initial wealth distribution 
 wealth_dist = [
