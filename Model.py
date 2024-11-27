@@ -68,6 +68,24 @@ class SavingAgent(Agent):
         # Update wealth
         self.wealth -= self.savings
 
+         # --- Print V and g ---
+        print(f"Agent {self.unique_id}: V =", V)
+        print(f"Agent {self.unique_id}: g =", g)
+
+         # --- Print wealth and savings before update ---
+        print(f"Agent {self.unique_id}: Wealth before update =", self.wealth)
+        print(f"Agent {self.unique_id}: Savings before update =", self.savings)
+
+        # Find optimal savings for current wealth
+        self.savings = g[np.argmin(np.abs(wealth_grid - self.wealth))]
+
+        # Update wealth
+        self.wealth -= self.savings
+
+        # --- Print wealth and savings after update ---
+        print(f"Agent {self.unique_id}: Wealth after update =", self.wealth)
+        print(f"Agent {self.unique_id}: Savings after update =", self.savings)
+
     def utility(self, consumption):
         """
         Calculate utility for a given consumption level.
@@ -205,34 +223,42 @@ for i in range(12):  # Run for X months
     model.step()
 
 # Analyze data
-agent_data = model.datacollector.get_agent_vars_dataframe()
 model_data = model.datacollector.get_model_vars_dataframe()
 agent_data = model.datacollector.get_agent_vars_dataframe()  # Get individual agent data
 
-# Plot average wealth over time
+for agent_id, agent_df in agent_data.groupby("AgentID"):
+    savings_list = np.ravel(agent_df["Savings"])
+    print(f"Agent {agent_id} Savings:", savings_list)
+
+plt.figure(figsize=(12, 6))
+
+# Plot average wealth and savings for all agents over time
+plt.subplot(2, 2, 1)
 plt.plot(model_data["Average_Wealth"], label="Average Wealth")
 plt.plot(model_data["Average_Savings"], label="Average Savings")  # Plot average savings
 plt.xlabel("Time (months)")
 plt.ylabel("Amount")
 plt.legend()
-plt.show()
+
 
 # Plot individual agent wealth
-plt.figure()
+plt.subplot(2, 2, 2) 
 for agent_id, agent_df in agent_data.groupby("AgentID"):
     plt.plot(np.ravel(agent_df["Wealth"]), label=f"Agent {agent_id}")
 plt.xlabel("Time (months)")
 plt.ylabel("Wealth")
 plt.title("Individual Agent Wealth Over Time")
 plt.legend()
-plt.show()
+
 
 # Plot individual agent savings
-plt.figure()
+plt.subplot(2, 2, 3) 
 for agent_id, agent_df in agent_data.groupby("AgentID"):
     plt.plot(np.ravel(agent_df["Savings"]), label=f"Agent {agent_id}")
 plt.xlabel("Time (months)")
 plt.ylabel("Savings")
 plt.title("Individual Agent Savings Over Time")
 plt.legend()
+
+plt.tight_layout()  # Adjust spacing between plots
 plt.show()
