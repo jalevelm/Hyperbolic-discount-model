@@ -117,14 +117,25 @@ class SavingAgent(Agent):
             # Agent has a natural inclination to dis-save
             possible_savings = np.linspace(-k, k, 100)  # Adjust grid size as needed
 
-        # Enforce borrowing limit  <--- Add this line here
+        # Enforce borrowing limit  
         possible_savings = possible_savings[k - possible_savings >= self.borrowing_limit] 
+
+        #  Implement No Reversal Principle 
+        if hasattr(self, 'previous_savings'):
+            if self.model.interest_rate > self.R_star and self.previous_savings <= 0:
+                possible_savings = possible_savings[possible_savings <= 1e-6]
+            elif self.model.interest_rate < self.R_star and self.previous_savings >= 0:
+                possible_savings = possible_savings[possible_savings >= -1e-6]
 
         # Vectorized calculation of V_next
         consumption = k - possible_savings  # Calculate consumption for all possible savings
         V_next = self.utility(consumption) + self.delta * V_old[np.argmin(np.abs(wealth_grid - possible_savings[:, np.newaxis]), axis=1)]  # Calculate the value function for all possible savings
 
-        return np.max(V_next), possible_savings[np.argmax(V_next)]  # Return the maximum value and the corresponding saving amount
+        # Store current savings as previous_savings for the next step  # New line
+        self.previous_savings = possible_savings[np.argmax(V_next)]  # New line
+
+        return np.max(V_next), self.previous_savings  # Modified to return self.previous_savings
+
 
 
 class SavingModel(Model):
