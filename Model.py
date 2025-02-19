@@ -14,7 +14,7 @@ class SavingAgent(Agent):
     """
     An agent with hyperbolic discounting preferences, making saving decisions
     """
-    def __init__(self, unique_id, model, beta, delta, init_wealth, sigma):
+    def __init__(self, unique_id, model, beta, delta, init_wealth, sigma, borrowing_limit):
         """
         Initialize a new agent.
 
@@ -33,6 +33,8 @@ class SavingAgent(Agent):
         self.wealth = init_wealth  
         self.sigma = sigma
         self.savings = 0 
+        self.R_star = 1 + (1 - self.delta) / (self.beta * self.delta)
+        self.borrowing_limit = borrowing_limit
 
     def step(self):
         """
@@ -40,10 +42,8 @@ class SavingAgent(Agent):
         """
 
         # Discretize possible wealth levels
-        wealth_grid = np.linspace(0, self.model.max_wealth, 10)  # Adjust grid size as needed
+        wealth_grid = np.linspace(0, self.model.max_wealth, 100)  # Adjust grid size as needed
 
-        # Calculate the threshold interest rate, R_star 
-        self.R_star = 1 + (1 - self.delta) / (self.beta * self.delta)
 
          # Print global R and agent's R_star
         print(f"Agent {self.unique_id}: Global R = {self.model.interest_rate}, R* = {self.R_star}")
@@ -54,7 +54,7 @@ class SavingAgent(Agent):
         g = np.zeros_like(wealth_grid)
 
         # Value iteration and policy improvement
-        for _ in range(10):  # Adjust number of iterations as needed
+        for _ in range(50):  # Adjust number of iterations as needed
             V_old = V.copy()
 
             # Parallelize the loop over wealth_grid
@@ -97,30 +97,28 @@ class SavingAgent(Agent):
     
     def optimize_savings(self, k, V_old, max_wealth, wealth_grid):
         """
-    Calculate the optimal savings amount.
+        Calculate the optimal savings amount.
 
-    Args:
+        Args:
         k: Current wealth level.
         V_old: Value function from the previous iteration.
         max_wealth: Maximum wealth level in the model.
         wealth_grid: Discretized wealth grid.
 
-    Returns:
+        Returns:
         tuple: (maximum value, corresponding saving amount)
         """
-        #possible_savings = np.linspace(0, k, 5)  # Adjust grid size as needed
-
-         # Calculate R_star for the agent
-        R_star = 1 + (1 - self.delta) / (self.beta * self.delta)
-
         # Adjust the range of possible savings based on the relationship 
         # between the model's interest rate and the agent's R_star
-        if self.model.interest_rate > R_star:
+        if self.model.interest_rate > self.R_star:
             # Agent has a natural inclination to save
-            possible_savings = np.linspace(0, k, 5)  # Adjust grid size as needed
+            possible_savings = np.linspace(0, k, 100)  # Adjust grid size as needed
         else:
             # Agent has a natural inclination to dis-save
-            possible_savings = np.linspace(-k, k, 5)  # Adjust grid size as needed
+            possible_savings = np.linspace(-k, k, 100)  # Adjust grid size as needed
+
+        # Enforce borrowing limit  <--- Add this line here
+        possible_savings = possible_savings[k - possible_savings >= self.borrowing_limit] 
 
         # Vectorized calculation of V_next
         consumption = k - possible_savings  # Calculate consumption for all possible savings
@@ -154,6 +152,7 @@ class SavingModel(Model):
         self.interest_rate = interest_rate
         self.sigma = sigma
         self.max_wealth = 10000000  # Adjust as needed
+        self.borrowing_limit = 0 
 
         # Create agents
         for i in range(self.num_agents):
@@ -171,7 +170,7 @@ class SavingModel(Model):
                     break
 
             # Create the agent with the chosen parameters
-            a = SavingAgent(i, self, beta, delta, init_wealth, sigma)
+            a = SavingAgent(i, self, beta, delta, init_wealth, sigma, self.borrowing_limit)
             self.schedule.add(a)
 
              # Place the agent at a random location on the grid
@@ -196,7 +195,7 @@ class SavingModel(Model):
         self.schedule.step()
 
 #_____________________________________________________________________ Example usage_______________________________________________________________________________
-N = 10  # Number of agents
+N = 1  # Number of agents
 width = 10
 height = 10
 interest_rate = 0.1  # Annual interest rate
