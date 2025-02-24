@@ -25,7 +25,7 @@ class SavingAgent(Agent):
             delta: Standard discount factor (general impatience).
             init_wealth: Initial wealth of the agent.
             salary: Agent's regular income.
-            sigma: Risk aversion parameter (how much the agent dislikes uncertainty).
+            sigma: Satisfaction elasticity: how much an agent's satisfaction changes when its consumption changes.
         """
         super().__init__(unique_id, model)
         self.beta = beta
@@ -65,26 +65,19 @@ class SavingAgent(Agent):
         # Find optimal savings for current wealth
         self.savings = g[np.argmin(np.abs(wealth_grid - self.wealth))]
 
+        # --- Print detailed agent data ---
+        print(f"Agent {self.unique_id}: Wealth = {self.wealth:.2f}, Savings = {self.savings:.2f}, "
+            f"Consumption = {self.wealth - self.savings:.2f}, R_star = {self.R_star:.2f}, "
+            f"Interest Rate = {self.model.interest_rate:.2f}, "
+            f"Utility = {self.utility(self.wealth - self.savings):.2f}")
+
         # Update wealth
         self.wealth -= self.savings
-
-         # --- Print V and g ---
-        print(f"Agent {self.unique_id}: V =", V)
-        print(f"Agent {self.unique_id}: g =", g)
-
-         # --- Print wealth and savings before update ---
-        print(f"Agent {self.unique_id}: Wealth before update =", self.wealth)
-        print(f"Agent {self.unique_id}: Savings before update =", self.savings)
 
         # Find optimal savings for current wealth
         self.savings = g[np.argmin(np.abs(wealth_grid - self.wealth))]
 
-        # Update wealth
-        self.wealth -= self.savings
 
-        # --- Print wealth and savings after update ---
-        print(f"Agent {self.unique_id}: Wealth after update =", self.wealth)
-        print(f"Agent {self.unique_id}: Savings after update =", self.savings)
 
     def utility(self, consumption):
         """
@@ -129,12 +122,22 @@ class SavingAgent(Agent):
 
         # Vectorized calculation of V_next
         consumption = k - possible_savings  # Calculate consumption for all possible savings
-        V_next = self.utility(consumption) + self.delta * V_old[np.argmin(np.abs(wealth_grid - possible_savings[:, np.newaxis]), axis=1)]  # Calculate the value function for all possible savings
+         # --- INTERPOLATION  ---
+        # Calculate the value of the next period's value function (V_old)
+        # using linear interpolation.  Instead of just taking the value
+        # at the nearest grid point, the value is estimated between grid
+        # points. This makes the value function approximation much more
+        # accurate.
+        interpolated_V_old = np.interp(possible_savings, wealth_grid, V_old)
+        V_next = self.utility(consumption) + self.delta * interpolated_V_old
+        # --- END OF INTERPOLATION ---
 
-        # Store current savings as previous_savings for the next step  # New line
-        self.previous_savings = possible_savings[np.argmax(V_next)]  # New line
+        max_index = np.argmax(V_next)
+        best_savings = possible_savings[max_index]
 
-        return np.max(V_next), self.previous_savings  # Modified to return self.previous_savings
+        self.previous_savings = best_savings  # Update previous_savings
+
+        return np.max(V_next), best_savings
 
 
 
@@ -151,7 +154,7 @@ class SavingModel(Model):
             width: Width of the grid.
             height: Height of the grid.
             interest_rate: The global interest rate in the economy.
-            sigma: Risk aversion parameter (same for all agents in this version).
+            sigma: satisfaction elasticity (how much does satisfaction changes when consumption changes) (same for all agents in this version).
             beta_ranges: Tuple (min, max) for the range of beta values for agents.
             delta_ranges: Tuple (min, max) for the range of delta values for agents.
             wealth_dist: A list of tuples defining the initial wealth distribution.
@@ -189,11 +192,17 @@ class SavingModel(Model):
             y = random.randrange(self.grid.height)
             self.grid.place_agent(a, (x, y))
 
-        # Data  collection
+        # Data collection
         self.datacollector = DataCollector(
-            model_reporters={"Average_Wealth": lambda m: np.mean([a.wealth for a in m.schedule.agents]),
-                             "Average_Savings": lambda m: np.mean([a.savings for a in m.schedule.agents])},  # Collect average savings
-            agent_reporters={"Wealth": "wealth", "Savings": "savings"}  # Collect individual savings
+            agent_reporters={
+                "Wealth": "wealth",
+                "Savings": "savings",
+                "Consumption": lambda a: a.wealth - a.savings,
+                "R_star": "R_star",
+                "Interest_Rate": lambda a: a.model.interest_rate,
+                "Utility": lambda a: a.utility(a.wealth - a.savings)
+            }
+
 
         
         )
@@ -209,8 +218,8 @@ class SavingModel(Model):
 N = 1  # Number of agents
 width = 10
 height = 10
-interest_rate = 0.1  # Annual interest rate
-sigma = 0.4387 # Example risk aversion parameter
+interest_rate = 0.15  # Annual interest rate
+sigma = 0.4387 # elasticity of satisfaction
 
 # Example usage with ranges for beta and delta
 beta_ranges = (0.70, 1)  # Beta range 
@@ -229,46 +238,39 @@ wealth_dist = [
 model = SavingModel(N, width, height, interest_rate, sigma, beta_ranges, delta_ranges, wealth_dist)
 
 # Run the model
-for i in range(12):  # Run for X months 
+for i in range(24):  # Run for X months 
     model.step()
 
 # Analyze data
-model_data = model.datacollector.get_model_vars_dataframe()
-agent_data = model.datacollector.get_agent_vars_dataframe()  # Get individual agent data
+agent_data = model.datacollector.get_agent_vars_dataframe()
 
-for agent_id, agent_df in agent_data.groupby("AgentID"):
-    savings_list = np.ravel(agent_df["Savings"])
-    print(f"Agent {agent_id} Savings:", savings_list)
+# --- Plot individual agent data ---
+plt.figure(figsize=(12, 8))
 
-plt.figure(figsize=(12, 6))
-
-# Plot average wealth and savings for all agents over time
 plt.subplot(2, 2, 1)
-plt.plot(model_data["Average_Wealth"], label="Average Wealth")
-plt.plot(model_data["Average_Savings"], label="Average Savings")  # Plot average savings
-plt.xlabel("Time (months)")
+plt.plot(agent_data["Wealth"].values, label="Wealth")
+plt.plot(agent_data["Savings"].values, label="Savings")
+plt.xlabel("Time")
 plt.ylabel("Amount")
 plt.legend()
 
-
-# Plot individual agent wealth
-plt.subplot(2, 2, 2) 
-for agent_id, agent_df in agent_data.groupby("AgentID"):
-    plt.plot(np.ravel(agent_df["Wealth"]), label=f"Agent {agent_id}")
-plt.xlabel("Time (months)")
-plt.ylabel("Wealth")
-plt.title("Individual Agent Wealth Over Time")
+plt.subplot(2, 2, 2)
+plt.plot(agent_data["Consumption"].values, label="Consumption")
+plt.xlabel("Time")
+plt.ylabel("Consumption")
 plt.legend()
 
+plt.subplot(2, 2, 3)
+plt.plot(agent_data["Utility"].values, label="Utility")
+plt.xlabel("Time")
+plt.ylabel("Utility")
+plt.legend()
 
-# Plot individual agent savings
-plt.subplot(2, 2, 3) 
-for agent_id, agent_df in agent_data.groupby("AgentID"):
-    plt.plot(np.ravel(agent_df["Savings"]), label=f"Agent {agent_id}")
-plt.xlabel("Time (months)")
+plt.subplot(2, 2, 4)
+plt.plot(agent_data["Wealth"].values, agent_data["Savings"].values, label="Wealth vs Savings")
+plt.xlabel("Wealth")
 plt.ylabel("Savings")
-plt.title("Individual Agent Savings Over Time")
 plt.legend()
 
-plt.tight_layout()  # Adjust spacing between plots
+plt.tight_layout()
 plt.show()
