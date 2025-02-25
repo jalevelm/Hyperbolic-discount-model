@@ -46,7 +46,7 @@ class SavingAgent(Agent):
 
 
          # Print global R and agent's R_star
-        print(f"Agent {self.unique_id}: Global R = {self.model.interest_rate}, R* = {self.R_star}")
+        print(f"Agent {self.unique_id}: Global R = {self.model.interest_rate}, R* = {self.R_star}, Beta = {self.beta}, Delta = {self.delta}")
 
 
         # Initialize value function and saving function
@@ -65,6 +65,8 @@ class SavingAgent(Agent):
         # Find optimal savings for current wealth
         self.savings = g[np.argmin(np.abs(wealth_grid - self.wealth))]
 
+        self.print_optimization_details(self.wealth, V, wealth_grid)
+
         # --- Print detailed agent data ---
         print(f"Agent {self.unique_id}: Wealth = {self.wealth:.2f}, Savings = {self.savings:.2f}, "
             f"Consumption = {self.wealth - self.savings:.2f}, R_star = {self.R_star:.2f}, "
@@ -74,10 +76,27 @@ class SavingAgent(Agent):
         # Update wealth
         self.wealth -= self.savings
 
-        # Find optimal savings for current wealth
-        self.savings = g[np.argmin(np.abs(wealth_grid - self.wealth))]
+    def print_optimization_details(self, k, V_old, wealth_grid):
+        """Prints detailed optimization information for a specific wealth level (k)."""
+        print(f"\n--- Agent {self.unique_id}: Optimizing Savings for k = {k:.2f} ---")
 
+        if self.model.interest_rate > self.R_star:
+            possible_savings = np.linspace(0, k, 10)  # Reduced for brevity
+        else:
+            possible_savings = np.linspace(-k, k, 10)
 
+        possible_savings = possible_savings[k - possible_savings >= self.borrowing_limit]
+        print(f"  Borrowing Limit Applied: {possible_savings}")
+
+        if hasattr(self, 'previous_savings'):
+            print(f"  Previous Savings: {self.previous_savings:.2f}")
+            if self.model.interest_rate > self.R_star and self.previous_savings <= 0:
+                possible_savings = possible_savings[possible_savings <= 1e-6]
+            elif self.model.interest_rate < self.R_star and self.previous_savings >= 0:
+                possible_savings = possible_savings[possible_savings >= -1e-6]
+            print(f"  No Reversal Applied: {possible_savings}")
+        else:
+            print("  No Previous Savings")    
 
     def utility(self, consumption):
         """
@@ -120,6 +139,7 @@ class SavingAgent(Agent):
             elif self.model.interest_rate < self.R_star and self.previous_savings >= 0:
                 possible_savings = possible_savings[possible_savings >= -1e-6]
 
+
         # Vectorized calculation of V_next
         consumption = k - possible_savings  # Calculate consumption for all possible savings
          # --- INTERPOLATION  ---
@@ -145,7 +165,7 @@ class SavingModel(Model):
     """
     A model with multiple saving agents.
     """
-    def __init__(self, N, width, height, interest_rate, sigma, beta_ranges, delta_ranges, wealth_dist):
+    def __init__(self, agent_profile, interest_rate, sigma, wealth_dist):
         """
         Initialize the model.
 
@@ -160,39 +180,20 @@ class SavingModel(Model):
             wealth_dist: A list of tuples defining the initial wealth distribution.
                          Each tuple is (probability, (min_wealth, max_wealth)).
         """
-        self.num_agents = N
-        self.grid = MultiGrid(width, height, True)  # Torus grid
+        super().__init__()  # Initialize the Model superclass
+        self.num_agents = 1 #number of agents
+        self.grid = MultiGrid(10, 10, True)  # Torus grid
         self.schedule = RandomActivation(self)
         self.interest_rate = interest_rate
         self.sigma = sigma
         self.max_wealth = 10000000  # Adjust as needed
         self.borrowing_limit = 0 
+        self.wealth_dist = wealth_dist
 
-        # Create agents
-        for i in range(self.num_agents):
-            # Sample beta and delta from ranges
-            beta = random.choice(np.arange(beta_ranges[0], beta_ranges[1] + 0.01, 0.01)) 
-            delta = random.choice(np.arange(delta_ranges[0], delta_ranges[1] + 0.01, 0.01)) 
+        # Create the single agent based on the profile
+        self.create_agent(agent_profile)
 
-            # Sample initial wealth based on distribution
-            rand_num = random.random()
-            cumulative_prob = 0
-            for prob, wealth_range in wealth_dist:  
-                cumulative_prob += prob
-                if rand_num <= cumulative_prob:
-                    init_wealth = random.randint(wealth_range[0], wealth_range[1])
-                    break
-
-            # Create the agent with the chosen parameters
-            a = SavingAgent(i, self, beta, delta, init_wealth, sigma, self.borrowing_limit)
-            self.schedule.add(a)
-
-             # Place the agent at a random location on the grid
-            x = random.randrange(self.grid.width)
-            y = random.randrange(self.grid.height)
-            self.grid.place_agent(a, (x, y))
-
-        # Data collection
+        # Data collection (same as before)
         self.datacollector = DataCollector(
             agent_reporters={
                 "Wealth": "wealth",
@@ -200,12 +201,31 @@ class SavingModel(Model):
                 "Consumption": lambda a: a.wealth - a.savings,
                 "R_star": "R_star",
                 "Interest_Rate": lambda a: a.model.interest_rate,
-                "Utility": lambda a: a.utility(a.wealth - a.savings)
+                "Utility": lambda a: a.utility(a.wealth - a.savings),
             }
-
-
-        
         )
+
+    def create_agent(self, profile):
+       # """Creates the single agent with the specified profile and initial wealth."""
+
+        # Sample initial wealth (same logic as before)
+        rand_num = random.random()
+        cumulative_prob = 0
+        init_wealth = 0  # Default initialization
+        for prob, wealth_range in self.wealth_dist:
+            cumulative_prob += prob
+            if rand_num <= cumulative_prob:
+                init_wealth = random.randint(wealth_range[0], wealth_range[1])
+                break
+        else:  # This 'else' belongs to the 'for' loop
+            # If no range is selected (e.g., rand_num is exactly 1.0),
+            # use the last wealth range.
+            init_wealth = random.randint(self.wealth_dist[-1][1][0], self.wealth_dist[-1][1][1])
+        
+        # Create the agent with the specified profile's beta and delta
+        agent = SavingAgent(0, self, profile["beta"], profile["delta"], init_wealth, self.sigma, self.borrowing_limit)
+        self.schedule.add(agent)
+        self.grid.place_agent(agent, (0, 0))  # Place agent (position irrelevant)
 
     def step(self):
         """
@@ -214,18 +234,16 @@ class SavingModel(Model):
         self.datacollector.collect(self)
         self.schedule.step()
 
-#_____________________________________________________________________ Example usage_______________________________________________________________________________
-N = 1  # Number of agents
-width = 10
-height = 10
+# --- Define Agent Profiles ---
+agent_profiles = {
+    "impulsive": {"beta": 0.6, "delta": 0.85},  # Lower than base values
+    "planner": {"beta": 0.8, "delta": 0.98},  # Higher than base values
+    "procrastinator": {"beta": 0.6, "delta": 0.98},  # Low beta, high delta
+    "moderate": {"beta": 0.7, "delta": 0.96},  # Base values
+}
+
 interest_rate = 1.15  # Annual gross interest rate
 sigma = 0.4387 # elasticity of satisfaction
-
-# Example usage with ranges for beta and delta
-beta_ranges = (0.70, 1)  # Beta range 
-delta_ranges = (0.95, 1)  # Delta range 
-
-# Initial wealth distribution 
 wealth_dist = [
     (0.41520521, (0, 9999)),  # Less than 10,000 USD
     (0.477205824, (10000, 99999)),  # Between 10,000 and 100,000 USD
@@ -234,11 +252,12 @@ wealth_dist = [
 ]
 
 
-# Create a model instance with the specified parameters
-model = SavingModel(N, width, height, interest_rate, sigma, beta_ranges, delta_ranges, wealth_dist)
+# -------------------------------------------------------- Run Simulation (Example: with the "impulsive" agent) ---
+#  Choose the agent profile you want to simulate.
+profile_to_use = "planner"
+model = SavingModel(agent_profiles[profile_to_use], interest_rate, sigma, wealth_dist)
 
-# Run the model
-for i in range(24):  # Run for X months 
+for i in range(24):
     model.step()
 
 # Analyze data
