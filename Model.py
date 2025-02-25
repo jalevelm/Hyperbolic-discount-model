@@ -218,7 +218,7 @@ class SavingModel(Model):
 N = 1  # Number of agents
 width = 10
 height = 10
-interest_rate = 0.15  # Annual interest rate
+interest_rate = 1.15  # Annual gross interest rate
 sigma = 0.4387 # elasticity of satisfaction
 
 # Example usage with ranges for beta and delta
