@@ -61,8 +61,9 @@ class SavingAgent(Agent):
         # Value iteration and policy improvement
         # Initialize V_old to something different from V to ensure at least one iteration
         V_old = np.ones_like(wealth_grid) * np.inf
-
-        for _ in range(500): # Adjust number of iterations as needed
+        iterations = 75
+        
+        for _ in range(iterations): # Adjust number of iterations as needed
             try:
                 # Parallelize the loop over wealth_grid
                 results = Parallel(n_jobs=-1)(
@@ -78,12 +79,12 @@ class SavingAgent(Agent):
                 raise
 
             # Convergence check
-            if np.max(np.abs(V - V_old)) < 1e-8:  # Tolerance of 1e-8
+            if np.max(np.abs(V - V_old)) < 1e-3:  # adjust tolerance
                 print(f"Agent {self.unique_id}: Value function converged after {_} iterations.")
                 break
             V_old = V.copy() # Copy V to V_old *after* the iteration
         else:
-            print(f"Agent {self.unique_id}: Value function DID NOT converge after 200 iterations.")
+            print(f"Agent {self.unique_id}: Value function DID NOT converge after {iterations} iterations.")
 
         closest_index = np.argmin(np.abs(wealth_grid - self.wealth))
         self.savings = g[closest_index]
@@ -97,10 +98,10 @@ class SavingAgent(Agent):
         print(f"\n--- Agent {self.unique_id}: Optimizing Savings for k = {k:.2f}, Initial Wealth: {self.init_wealth} ---")
 
         if self.model.interest_rate > self.R_star:
-            possible_savings = np.linspace(0, k, 10)  # Reduced for brevity
+            possible_savings = np.linspace(0, k, 50)  # Reduced for brevity
         else:
             lower_bound = max(-abs(self.borrowing_limit), -k)  # Correct lower bound
-            possible_savings = np.linspace(lower_bound, k, 10)
+            possible_savings = np.linspace(lower_bound, k, 50)
 
 
         if self.previous_savings is not None:
@@ -146,6 +147,8 @@ class SavingAgent(Agent):
             utility = np.log(consumption) + future_utility
             return -utility.sum(), k  # Negative for minimization, return k as well
 
+            print(f"    k_next: {k_next:.2f}, consumption: {consumption:.2f}, future_utility: {future_utility:.2f}, total_utility: {total_utility:.2f}") 
+
         except Exception as e:
             print(f"Error in optimize_savings with k={k}: {e}")
             return None, None  # Return None if optimization fails
@@ -165,7 +168,7 @@ class SavingModel(Model):
         self.borrowing_limit = 0 
         self.wealth_dist = wealth_dist
         self.create_agent(agent_profile)
-        self.wealth_grid = np.linspace(0, self.max_wealth * self.interest_rate, 200)
+        self.wealth_grid = np.linspace(0, self.max_wealth * self.interest_rate, 200) #ajust wealth grid size
 
 
         # Data collection 
@@ -211,9 +214,9 @@ class SavingModel(Model):
 
 # --- Define Agent Profiles ---
 agent_profiles = {
-    "impulsive": {"beta": 0.6, "delta": 0.85},  # Lower than base values
-    "planner": {"beta": 0.8, "delta": 0.98},  # Higher than base values
-    "procrastinator": {"beta": 0.6, "delta": 0.98},  # Low beta, high delta
+    "impulsive": {"beta": 0.6, "delta": 0.85},  # lower beta = more present bias, lower delta = less patient
+    "planner": {"beta": 0.8, "delta": 0.98},  # Higher beta = less present bias, higer delta = more patient
+    "procrastinator": {"beta": 0.6, "delta": 0.98},  # low beta = more present bias, high delta = more patient, values also future consumption
     "moderate": {"beta": 0.7, "delta": 0.96},  # Base values
 }
 
