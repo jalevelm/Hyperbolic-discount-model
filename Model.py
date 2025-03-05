@@ -38,6 +38,7 @@ class SavingAgent(Agent):
         self.previous_savings = None
         self.init_wealth = init_wealth
         self.step_count = 0
+        self.previous_wealth = 0
         print(f"Agent {unique_id} initialized. init_wealth: {self.init_wealth}, wealth: {self.wealth}")  # Debug print
 
     def step(self):
@@ -50,48 +51,44 @@ class SavingAgent(Agent):
 
         print(f"Agent {self.unique_id}: Step start. Wealth: {self.wealth}, Previous Savings: {self.previous_savings}") # Debug print
 
+        self.previous_wealth = self.wealth
+
         wealth_grid = self.model.wealth_grid
         k = self.wealth
-
-        # Initialize value function and saving function
         V = np.zeros_like(wealth_grid)
         g = np.zeros_like(wealth_grid)
+        V_old = np.zeros_like(wealth_grid)  # Initialize V_old to zeros
         print(f"Agent {self.unique_id}: Starting value iteration...")
-
-        # Value iteration and policy improvement
-        # Initialize V_old to something different from V to ensure at least one iteration
-        V_old = np.ones_like(wealth_grid) * np.inf
-        iterations = 75
+        iterations = 200
         
-        for _ in range(iterations): # Adjust number of iterations as needed
-            try:
-                # Parallelize the loop over wealth_grid
-                results = Parallel(n_jobs=-1)(
-                    delayed(self.optimize_savings)(k_val, V_old, wealth_grid)
-                    for k_val in wealth_grid
-                )
-                #Check for None values from the try-except block
-                V = np.array([result[0] if result is not None else 0 for result in results])
-                g = np.array([result[1] if result is not None else 0 for result in results])
+        for _ in range(iterations):
+            for i, k_val in enumerate(wealth_grid):
+                continuation_value, next_k = self.optimize_savings(k_val, V_old, wealth_grid)
+                # *** Safeguard for very small consumption ***
+                consumption = self.model.interest_rate * k_val - next_k
+                epsilon = 1e-9
+                consumption = max(consumption, epsilon) #Ensure consumption is not too small
+                V[i] = self.utility(consumption) + self.beta * continuation_value # Pass the corrected value
+                g[i] = next_k
 
-            except Exception as e:
-                print(f"Agent {self.unique_id}: Error in parallel loop (iteration {_}): {e}")
-                raise
+            if np.any(np.isnan(V)):  # *** ADD THIS CHECK ***
+                print(f"Agent {self.unique_id}: NaN detected in V after iteration {_}!")
+                # You might even want to *stop* the simulation here with 'break'
+                break    
 
-            # Convergence check
-            if np.max(np.abs(V - V_old)) < 1e-3:  # adjust tolerance
+            if np.max(np.abs(V - V_old)) < 1e-3:
                 print(f"Agent {self.unique_id}: Value function converged after {_} iterations.")
                 break
-            V_old = V.copy() # Copy V to V_old *after* the iteration
+            V_old = V.copy()
         else:
             print(f"Agent {self.unique_id}: Value function DID NOT converge after {iterations} iterations.")
 
         closest_index = np.argmin(np.abs(wealth_grid - self.wealth))
         self.savings = g[closest_index]
-        self.wealth = self.wealth + (self.model.interest_rate - 1) * self.savings
+        self.wealth = self.model.interest_rate * self.previous_wealth - (self.previous_wealth - self.savings)
+        consumption = self.model.interest_rate * self.previous_wealth - self.savings
         self.previous_savings = self.savings
-
-        print(f"Agent {self.unique_id}: Step end.  Wealth: {self.wealth}, Savings: {self.savings}") # Debug print
+        print(f"Agent {self.unique_id}: Step end.  Wealth: {self.wealth:.2f}, Savings: {self.savings:.2f}, Consumption: {consumption:.2f}")
 
 
     def print_optimization_details(self, k, V_old, wealth_grid):
@@ -116,42 +113,46 @@ class SavingAgent(Agent):
         """
         Calculate utility for a given consumption level.
         """
+        epsilon = 1e-9  # Small positive value
+        consumption = max(consumption, epsilon)  # Ensure consumption is never too small
         if self.sigma == 1:
             return np.log(consumption)
-        return consumption**(1 - self.sigma) / (1 - self.sigma) if consumption > 0 else -np.inf
+        return consumption**(1 - self.sigma) / (1 - self.sigma)
 
     
     def optimize_savings(self, k, V, wealth_grid):
-        """Optimize savings for a given wealth level k."""
-        try:
-            beta = self.beta
-            consumption = wealth_grid - k
-            consumption[consumption <= 0] = 1e-10  # Avoid log(0)
+        """Optimize savings for a given wealth level k (simplified)."""
+        beta = self.beta
+        delta = self.delta
+        R = self.model.interest_rate
 
-            future_wealth = self.wealth + (self.model.interest_rate - 1) * k
+        def objective(k_next):
+            consumption = R * k - k_next
+            if consumption <= 1e-6:
+                return np.inf  # Avoid log(0) and enforce positive consumption
 
-            # --- KEY CHANGE: Input validation and clipping ---
-            future_wealth_valid = np.isfinite(future_wealth)  # Check for inf/nan
-            if not np.all(future_wealth_valid):
-                #print(f"Agent {self.unique_id}: Invalid future_wealth: {future_wealth}") #Debugging
-                future_wealth = np.where(future_wealth_valid, future_wealth, np.nanmax(future_wealth[future_wealth_valid])) # Replace inf with max finite value
+            future_wealth = k_next
+            future_wealth = np.clip(future_wealth, wealth_grid.min(), wealth_grid.max())
+            future_utility = delta * np.interp(future_wealth, wealth_grid, V, left=V[0], right=V[-1])
+            total_utility = self.utility(consumption) + beta * future_utility
+            return -total_utility
 
-            # Clip future_wealth to a reasonable range
-            min_wealth = wealth_grid[0] - (wealth_grid[1] - wealth_grid[0])  # One grid step below min
-            max_wealth = wealth_grid[-1] + (wealth_grid[1] - wealth_grid[0])  # One grid step above max
-            future_wealth = np.clip(future_wealth, min_wealth, max_wealth)
-            # --- END KEY CHANGE ---
+            if abs(k - self.wealth) < 1000:  # Adjust the tolerance (100) as needed
+                print(f"    k_next: {k_next:.2f}, consumption: {consumption:.2f}, future_utility: {future_utility:.2f}, total_utility: {total_utility}")
+            return -total_utility
 
+        lower_bound = max(self.borrowing_limit, 0)  # Borrowing constraint
+        result = optimize.minimize_scalar(objective, bounds=(lower_bound, R * k), method='bounded')
 
-            future_utility = beta * np.interp(future_wealth, wealth_grid, V, left=V[0], right=V[-1]) #Extrapolate by using the extreme values
-            utility = np.log(consumption) + future_utility
-            return -utility.sum(), k  # Negative for minimization, return k as well
+        if result.success:
+            optimal_k_next = result.x
+            optimal_k_next = np.clip(optimal_k_next, wealth_grid.min(), wealth_grid.max())
+            continuation_value = delta * np.interp(optimal_k_next, wealth_grid, V, left=V[0], right=V[-1])
+            return continuation_value, optimal_k_next
+        else:
+            print(f"Agent {self.unique_id}: Optimization FAILED for k={k}")
+            return 0, k
 
-            print(f"    k_next: {k_next:.2f}, consumption: {consumption:.2f}, future_utility: {future_utility:.2f}, total_utility: {total_utility:.2f}") 
-
-        except Exception as e:
-            print(f"Error in optimize_savings with k={k}: {e}")
-            return None, None  # Return None if optimization fails
 
 
 class SavingModel(Model):
@@ -168,7 +169,7 @@ class SavingModel(Model):
         self.borrowing_limit = 0 
         self.wealth_dist = wealth_dist
         self.create_agent(agent_profile)
-        self.wealth_grid = np.linspace(0, self.max_wealth * self.interest_rate, 200) #ajust wealth grid size
+        self.wealth_grid = np.linspace(0, self.max_wealth * self.interest_rate, 50) #ajust wealth grid size
 
 
         # Data collection 
@@ -176,10 +177,10 @@ class SavingModel(Model):
             agent_reporters={
                 "Wealth": "wealth",
                 "Savings": "savings",
-                "Consumption": lambda a: a.wealth - a.savings,
+                "Consumption": lambda a: a.model.interest_rate * a.previous_wealth - a.savings,
                 "R_star": "R_star",
                 "Interest_Rate": lambda a: a.model.interest_rate,
-                "Utility": lambda a: a.utility(a.wealth - a.savings),
+                "Utility": lambda a: a.utility(a.model.interest_rate * a.previous_wealth - a.savings),
             }
         )
         print("Model initialized")
@@ -220,8 +221,8 @@ agent_profiles = {
     "moderate": {"beta": 0.7, "delta": 0.96},  # Base values
 }
 
-interest_rate = 1.16
 sigma = 0.4387 # elasticity of satisfaction
+
 wealth_dist = [
     (0.41520521, (0, 9999)),  # Less than 10,000 USD
     (0.477205824, (10000, 99999)),  # Between 10,000 and 100,000 USD
@@ -231,20 +232,20 @@ wealth_dist = [
 
 
 # -------------------------------------------------------- Run Simulation-----------------------
-profile_to_use = "impulsive"
-model = SavingModel(agent_profiles[profile_to_use], interest_rate, sigma, wealth_dist)
+for profile_name, profile in agent_profiles.items():
+    print(f"\n----- Running Simulations for {profile_name} -----")
+    r_star = 1 + (1 - profile["delta"]) / (profile["beta"] * profile["delta"])
 
-for i in range(2):
-    print(f"--- Starting model step {i+1} ---")  # Debug print
-    try:
-        model.step()
-    except Exception as e:
-        print(f"Error in model step {i+1}: {e}")
-        break  # Stop the loop if there's an error
-    print(f"--- Finished model step {i+1} ---")  # Debug print
+    for rate_multiplier in [0.9, 1.1]:  # Test below and above R_star
+        interest_rate = r_star * rate_multiplier
+        print(f"  Interest Rate: {interest_rate:.4f} (R_star = {r_star:.4f})")
 
-# Analyze data
-try: 
+        model = SavingModel(profile, interest_rate, sigma, wealth_dist)
+        for i in range(5):  # A few steps for debugging
+            model.step()
+
+    # Analyze data
+
     agent_data = model.datacollector.get_agent_vars_dataframe()
 
     # --- Plot individual agent data ---
@@ -277,6 +278,3 @@ try:
 
     plt.tight_layout()
     plt.show()
-
-except Exception as e:
-    print(f"Error during data analysis or plotting: {e}")
