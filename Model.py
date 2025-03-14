@@ -234,15 +234,13 @@ wealth_dist = [
 # -------------------------------------------------------- Run Simulation-----------------------
 for profile_name, profile in agent_profiles.items():
     print(f"\n----- Running Simulations for {profile_name} -----")
-    r_star = 1 + (1 - profile["delta"]) / (profile["beta"] * profile["delta"])
 
-    for rate_multiplier in [0.9, 1.1]:  # Test below and above R_star
-        interest_rate = r_star * rate_multiplier
-        print(f"  Interest Rate: {interest_rate:.4f} (R_star = {r_star:.4f})")
+    # Set a fixed interest rate.  You can experiment with different values.
+    interest_rate = 1.03  # Example: 3% interest rate
 
-        model = SavingModel(profile, interest_rate, sigma, wealth_dist)
-        for i in range(5):  # A few steps for debugging
-            model.step()
+    model = SavingModel(profile, interest_rate, sigma, wealth_dist)
+    for i in range(10):  # Number of steps
+        model.step()
 
     # Analyze data
 
