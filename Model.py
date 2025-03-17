@@ -1,8 +1,9 @@
+import sys 
+import os 
 from mesa import Agent, Model
 from mesa.time import RandomActivation
 from mesa.space import MultiGrid
 from mesa.datacollection import DataCollector  
-
 import random
 import numpy as np
 import matplotlib.pyplot as plt
@@ -15,99 +16,100 @@ class SavingAgent(Agent):
     An agent with hyperbolic discounting preferences, making saving decisions
     """
     def __init__(self, unique_id, model, beta, delta, init_wealth, sigma, borrowing_limit):
-        """
-        Initialize a new agent.
-
-        Argumentss:
-            unique_id: Unique identifier for the agent.
-            model: The model the agent belongs to.
-            beta: Present bias parameter (how much the agent discounts the future, A lower β implies a stronger preference for present consumption.this makes individuals discount the next period more heavily than any two future periods).
-            delta: Standard discount factor (general impatience).
-            init_wealth: Initial wealth of the agent.
-            salary: Agent's regular income.
-            sigma: Satisfaction elasticity: how much an agent's satisfaction changes when its consumption changes.
-        """
         super().__init__(unique_id, model)
         self.beta = beta
         self.delta = delta
-        self.wealth = init_wealth  
+        self.wealth = init_wealth
         self.sigma = sigma
-        self.savings = 0 
+        self.savings = 0
         self.R_star = 1 + (1 - self.delta) / (self.beta * self.delta)
         self.borrowing_limit = borrowing_limit
         self.previous_savings = None
         self.init_wealth = init_wealth
         self.step_count = 0
-        self.previous_wealth = 0
-        print(f"Agent {unique_id} initialized. init_wealth: {self.init_wealth}, wealth: {self.wealth}")  # Debug print
+        self.previous_wealth = init_wealth 
+        self.value_function_calculated = False # Flag for value iteration
+        self.V = None  # Store the value function
+        self.g = None  # Store the policy function
 
     def step(self):
-        """
-        Define the agent's actions in each time step.
-        """
         if self.step_count == 0:
-            print(f"Agent {self.unique_id}: First Step - Beta: {self.beta}, Delta: {self.delta}, R_star: {self.R_star}") # Debug print
+            print(f"Agent {self.unique_id}: First Step - Beta: {self.beta}, Delta: {self.delta}, R_star: {self.R_star}")
         self.step_count += 1
-
-        print(f"Agent {self.unique_id}: Step start. Wealth: {self.wealth}, Previous Savings: {self.previous_savings}") # Debug print
-
-        self.previous_wealth = self.wealth
+        print(f"Agent {self.unique_id}: Step start. Wealth: {self.wealth}, Previous Savings: {self.previous_savings}")
+        print(f"Agent {self.unique_id}: R = {self.model.interest_rate}, R_star = {self.R_star}")
 
         wealth_grid = self.model.wealth_grid
-        k = self.wealth
-        V = np.zeros_like(wealth_grid)
-        g = np.zeros_like(wealth_grid)
-        V_old = np.zeros_like(wealth_grid)  # Initialize V_old to zeros
-        print(f"Agent {self.unique_id}: Starting value iteration...")
-        iterations = 200
-        
-        for _ in range(iterations):
-            for i, k_val in enumerate(wealth_grid):
-                continuation_value, next_k = self.optimize_savings(k_val, V_old, wealth_grid)
-                # *** Safeguard for very small consumption ***
-                consumption = self.model.interest_rate * k_val - next_k
-                epsilon = 1e-9
-                consumption = max(consumption, epsilon) #Ensure consumption is not too small
-                V[i] = self.utility(consumption) + self.beta * continuation_value # Pass the corrected value
-                g[i] = next_k
 
-            if np.any(np.isnan(V)):  # *** ADD THIS CHECK ***
-                print(f"Agent {self.unique_id}: NaN detected in V after iteration {_}!")
-                # You might even want to *stop* the simulation here with 'break'
-                break    
+        # Value Iteration (only once, at the beginning)
+        if not self.value_function_calculated:
+            print(f"Agent {self.unique_id}: Starting value iteration...")
+            V = np.zeros_like(wealth_grid)
+            g = np.zeros_like(wealth_grid)
+            iterations = 500  # Increased iterations
+            tolerance = 1e-6  # Tighter tolerance
 
-            if np.max(np.abs(V - V_old)) < 1e-3:
-                print(f"Agent {self.unique_id}: Value function converged after {_} iterations.")
-                break
-            V_old = V.copy()
-        else:
-            print(f"Agent {self.unique_id}: Value function DID NOT converge after {iterations} iterations.")
+            for _ in range(iterations):
+                V_old = V.copy()
+                for i, k_val in enumerate(wealth_grid):
+                    continuation_value, next_k, _ = self.optimize_savings(k_val, V, wealth_grid)
+                    consumption = self.model.interest_rate * k_val - next_k
+                    consumption = max(consumption, 1e-9)
+                    V[i] = self.utility(consumption) + self.beta * continuation_value
+                    g[i] = next_k
 
-        closest_index = np.argmin(np.abs(wealth_grid - self.wealth))
-        self.savings = g[closest_index]
-        self.wealth = self.model.interest_rate * self.previous_wealth - (self.previous_wealth - self.savings)
-        consumption = self.model.interest_rate * self.previous_wealth - self.savings
+                if np.any(np.isnan(V)):
+                    print(f"Agent {self.unique_id}: NaN detected in V after iteration {_}!")
+                    break
+
+                if np.max(np.abs(V - V_old)) < tolerance:
+                    print(f"Agent {self.unique_id}: Value function converged after {_} iterations.")
+                    break
+            else:
+                print(f"Agent {self.unique_id}: Value function DID NOT converge after {iterations} iterations.")
+
+            self.V = V
+            self.g = g
+            self.value_function_calculated = True
+
+            '''# --- Plot Value and Policy Functions (after value iteration) ---
+            plt.figure(figsize=(10, 5))
+            plt.subplot(1, 2, 1)
+            plt.plot(wealth_grid, self.V)
+            plt.title(f"Agent {self.unique_id}: Value Function")
+            plt.xlabel("Wealth (k)")
+            plt.ylabel("V(k)")
+
+            plt.subplot(1, 2, 2)
+            plt.plot(wealth_grid, self.g)
+            plt.axhline(y=0, color='r', linestyle='--') # Add horizontal line at y=0
+            plt.title(f"Agent {self.unique_id}: Policy Function")
+            plt.xlabel("Current Wealth (k)")
+            plt.ylabel("Next Period Wealth (g(k))")
+            plt.plot(wealth_grid, wealth_grid, color='green', linestyle=':', label = '45 degree line')
+            plt.legend()
+            plt.show() '''
+
+        # Agent's Decision (using pre-calculated policy function)
+        self.savings = np.interp(self.wealth, wealth_grid, self.g)  # Interpolate!
+        self.savings = np.clip(self.savings, self.borrowing_limit, self.model.interest_rate * self.wealth)
+        consumption = self.model.interest_rate * self.wealth - self.savings
+        consumption = max(consumption, 1e-9)  # Ensure positive consumption
+
+
+        # --- Debugging Prints (Once per Step) ---
+        print(f"Agent {self.unique_id}: Step {self.step_count}")
+        print(f"  Previous Wealth: {self.previous_wealth:.4f}")
+        print(f"  Calculated Savings: {self.savings:.4f}")
+        print(f"  New Wealth: {self.wealth:.4f}")
+        print(f"  Consumption: {consumption:.4f}")
+        # --- End Debugging Prints ---
+
+        # Update wealth and previous_wealth *CORRECTLY*
+        self.previous_wealth = self.wealth  # *Before* updating wealth
+        self.wealth = self.savings # Wealth in next period is savings from this period.
         self.previous_savings = self.savings
         print(f"Agent {self.unique_id}: Step end.  Wealth: {self.wealth:.2f}, Savings: {self.savings:.2f}, Consumption: {consumption:.2f}")
-
-
-    def print_optimization_details(self, k, V_old, wealth_grid):
-        print(f"\n--- Agent {self.unique_id}: Optimizing Savings for k = {k:.2f}, Initial Wealth: {self.init_wealth} ---")
-
-        if self.model.interest_rate > self.R_star:
-            possible_savings = np.linspace(0, k, 50)  # Reduced for brevity
-        else:
-            lower_bound = max(-abs(self.borrowing_limit), -k)  # Correct lower bound
-            possible_savings = np.linspace(lower_bound, k, 50)
-
-
-        if self.previous_savings is not None:
-            print(f"  Previous Savings: {self.previous_savings:.2f}")
-            if self.model.interest_rate > self.R_star and self.previous_savings <= 0:
-                possible_savings = possible_savings[possible_savings <= 1e-6]
-            elif self.model.interest_rate < self.R_star and self.previous_savings >= 0:
-                possible_savings = possible_savings[possible_savings >= -1e-6]
-        print(f"  Possible Savings (after no-reversal if applicable): {possible_savings}")
 
     def utility(self, consumption):
         """
@@ -121,7 +123,6 @@ class SavingAgent(Agent):
 
     
     def optimize_savings(self, k, V, wealth_grid):
-        """Optimize savings for a given wealth level k (simplified)."""
         beta = self.beta
         delta = self.delta
         R = self.model.interest_rate
@@ -129,50 +130,54 @@ class SavingAgent(Agent):
         def objective(k_next):
             consumption = R * k - k_next
             if consumption <= 1e-6:
-                return np.inf  # Avoid log(0) and enforce positive consumption
+                return np.inf
 
             future_wealth = k_next
-            future_wealth = np.clip(future_wealth, wealth_grid.min(), wealth_grid.max())
-            future_utility = delta * np.interp(future_wealth, wealth_grid, V, left=V[0], right=V[-1])
+            future_wealth = np.clip(future_wealth, wealth_grid.min(), wealth_grid.max()) # Clip here.
+
+            future_utility = delta * np.interp(future_wealth, wealth_grid, V)
             total_utility = self.utility(consumption) + beta * future_utility
             return -total_utility
 
-            if abs(k - self.wealth) < 1000:  # Adjust the tolerance (100) as needed
-                print(f"    k_next: {k_next:.2f}, consumption: {consumption:.2f}, future_utility: {future_utility:.2f}, total_utility: {total_utility}")
-            return -total_utility
-
-        lower_bound = max(self.borrowing_limit, 0)  # Borrowing constraint
+        lower_bound = max(self.borrowing_limit, 0)
         result = optimize.minimize_scalar(objective, bounds=(lower_bound, R * k), method='bounded')
+
 
         if result.success:
             optimal_k_next = result.x
-            optimal_k_next = np.clip(optimal_k_next, wealth_grid.min(), wealth_grid.max())
-            continuation_value = delta * np.interp(optimal_k_next, wealth_grid, V, left=V[0], right=V[-1])
-            return continuation_value, optimal_k_next
+            optimal_k_next = np.clip(optimal_k_next, wealth_grid.min(), wealth_grid.max()) # Ensure bounds
+
+            continuation_value = delta * np.interp(optimal_k_next, wealth_grid, V)
+            final_consumption = R * k - optimal_k_next
+            final_total_utility = self.utility(final_consumption) + beta * continuation_value
+
+            return continuation_value, optimal_k_next, final_total_utility
         else:
             print(f"Agent {self.unique_id}: Optimization FAILED for k={k}")
-            return 0, k
+            print(result)
+            return 0, k, 0
+
 
 
 
 class SavingModel(Model):
  
     def __init__(self, agent_profile, interest_rate, sigma, wealth_dist):
-  
+
         super().__init__()  # Initialize the Model superclass
         self.num_agents = 1 #number of agents
-        self.grid = MultiGrid(10, 10, True)  # Torus grid
+        self.grid = MultiGrid(10, 10, True)  # Torus grid, not used but kept for compatibility
         self.schedule = RandomActivation(self)
         self.interest_rate = interest_rate
         self.sigma = sigma
-        self.max_wealth = 10000000  # Adjust as needed
-        self.borrowing_limit = 0 
+        self.max_wealth = 50000000  # Adjusted for faster convergence
+        self.borrowing_limit = 0
         self.wealth_dist = wealth_dist
         self.create_agent(agent_profile)
-        self.wealth_grid = np.linspace(0, self.max_wealth * self.interest_rate, 50) #ajust wealth grid size
+        self.wealth_grid = np.linspace(0, self.max_wealth, 500) # Increased density, adjusted range
 
 
-        # Data collection 
+        # Data collection
         self.datacollector = DataCollector(
             agent_reporters={
                 "Wealth": "wealth",
@@ -186,23 +191,23 @@ class SavingModel(Model):
         print("Model initialized")
 
     def create_agent(self, profile):
-        print(f"Creating agent with profile: {profile}")  # Debug print
-        rand_num = random.random()
-        cumulative_prob = 0
-        init_wealth = 0  # Default initialization
-        for prob, wealth_range in self.wealth_dist:
-            cumulative_prob += prob
-            if rand_num <= cumulative_prob:
-                init_wealth = random.randint(wealth_range[0], wealth_range[1])
-                break
-        else:  
-            init_wealth = random.randint(max(1, self.wealth_dist[-1][1][0]), self.wealth_dist[-1][1][1])
-        
-        # Create the agent with the specified profile's beta and delta
-        agent = SavingAgent(0, self, profile["beta"], profile["delta"], init_wealth, self.sigma, self.borrowing_limit)
-        self.schedule.add(agent)
-        self.grid.place_agent(agent, (0, 0))  # Place agent (position irrelevant)
-        print(f"Agent created and added to schedule. Initial wealth: {init_wealth}")  # Debug print
+            print(f"Creating agent with profile: {profile}")
+            rand_num = random.random()
+            cumulative_prob = 0
+            init_wealth = 0
+            for prob, wealth_range in self.wealth_dist:
+                cumulative_prob += prob
+                if rand_num <= cumulative_prob:
+                    init_wealth = random.randint(wealth_range[0], wealth_range[1])
+                    break
+            else:
+                init_wealth = random.randint(max(1, self.wealth_dist[-1][1][0]), self.wealth_dist[-1][1][1])
+
+            agent = SavingAgent(0, self, profile["beta"], profile["delta"], init_wealth, self.sigma, self.borrowing_limit)
+            self.schedule.add(agent)
+            self.grid.place_agent(agent, (0, 0))  # Position irrelevant
+            print(f"Agent created and added to schedule. Initial wealth: {init_wealth}")        
+
 
     def step(self):
         """
@@ -230,49 +235,87 @@ wealth_dist = [
     (0.004466772, (1000000, 10000000))  # More than 1,000,000 USD 
 ]
 
+# --- Redirect Output to File ---
+output_dir = "output"
+os.makedirs(output_dir, exist_ok=True)  # Create the directory if it doesn't exist
+output_file_path = os.path.join(output_dir, "simulation_output.txt")
+
+with open(output_file_path, "w") as output_file:
+    sys.stdout = output_file  # Redirect standard output to the file
 
 # -------------------------------------------------------- Run Simulation-----------------------
-for profile_name, profile in agent_profiles.items():
-    print(f"\n----- Running Simulations for {profile_name} -----")
+    for profile_name, profile in agent_profiles.items():
+        print(f"\n                                                                                    ----- Running Simulations for {profile_name} -----")
 
-    # Set a fixed interest rate.  You can experiment with different values.
-    interest_rate = 1.03  # Example: 3% interest rate
+        # Test different interest rates
+        for interest_rate in [1.01, 1.02, 1.03, 1.04, 1.05, 1.06, 1.07, 1.10, 1.20, 1.30]:  # Example interest rates
+            print(f"\n--- Interest Rate: {interest_rate} ---")
+            model = SavingModel(profile, interest_rate, sigma, wealth_dist)
+            for i in range(10):  # Number of steps
+                model.step()
 
-    model = SavingModel(profile, interest_rate, sigma, wealth_dist)
-    for i in range(10):  # Number of steps
-        model.step()
-
-    # Analyze data
-
-    agent_data = model.datacollector.get_agent_vars_dataframe()
+            # Analyze data
+            agent_data = model.datacollector.get_agent_vars_dataframe()
 
     # --- Plot individual agent data ---
-    plt.figure(figsize=(12, 8))
+            agent = model.schedule.agents[0]  # Access the agent
+            if agent.value_function_calculated:
+                plt.figure(figsize=(10, 5))
+                plt.subplot(1, 2, 1)
+                plt.plot(model.wealth_grid, agent.V)
+                plt.title(f"Agent {agent.unique_id}: Value Function ({profile_name}, R={interest_rate})")
+                plt.xlabel("Wealth (k)")
+                plt.ylabel("V(k)")
 
-    plt.subplot(2, 2, 1)
-    plt.plot(agent_data["Wealth"].values, label="Wealth")
-    plt.plot(agent_data["Savings"].values, label="Savings")
-    plt.xlabel("Time")
-    plt.ylabel("Amount")
-    plt.legend()
+                plt.subplot(1, 2, 2)
+                plt.plot(model.wealth_grid, agent.g)
+                plt.plot(model.wealth_grid, model.wealth_grid, color='red', linestyle='--', label="45-degree line")
+                plt.title(f"Agent {agent.unique_id}: Policy Function ({profile_name}, R={interest_rate})")
+                plt.xlabel("Current Wealth (k)")
+                plt.ylabel("Next Period Wealth (g(k))")
+                plt.legend()
+                plot_filename = f"output/{profile_name}_R{interest_rate}_value_policy_plots.png" #Saving plots
+                plt.savefig(plot_filename)
+                plt.close()
 
-    plt.subplot(2, 2, 2)
-    plt.plot(agent_data["Consumption"].values, label="Consumption")
-    plt.xlabel("Time")
-    plt.ylabel("Consumption")
-    plt.legend()
 
-    plt.subplot(2, 2, 3)
-    plt.plot(agent_data["Utility"].values, label="Utility")
-    plt.xlabel("Time")
-    plt.ylabel("Utility")
-    plt.legend()
+            plt.figure(figsize=(12, 8))
 
-    plt.subplot(2, 2, 4)
-    plt.plot(agent_data["Wealth"].values, agent_data["Savings"].values, label="Wealth vs Savings")
-    plt.xlabel("Wealth")
-    plt.ylabel("Savings")
-    plt.legend()
+            plt.subplot(2, 2, 1)
+            plt.plot(agent_data["Wealth"].values, label="Wealth")
+            plt.plot(agent_data["Savings"].values, label="Savings")
+            plt.xlabel("Time")
+            plt.ylabel("Amount")
+            plt.title(f"{profile_name} - R={interest_rate} - Wealth & Savings") # Add to title
+            plt.legend()
 
-    plt.tight_layout()
-    plt.show()
+            plt.subplot(2, 2, 2)
+            plt.plot(agent_data["Consumption"].values, label="Consumption")
+            plt.xlabel("Time")
+            plt.ylabel("Consumption")
+            plt.title(f"{profile_name} - R={interest_rate} - Consumption")  # Add to title
+            plt.legend()
+
+            plt.subplot(2, 2, 3)
+            plt.plot(agent_data["Utility"].values, label="Utility")
+            plt.xlabel("Time")
+            plt.ylabel("Utility")
+            plt.title(f"{profile_name} - R={interest_rate} - Utility")  # Add to title
+            plt.legend()
+
+            plt.subplot(2, 2, 4)
+            plt.plot(agent_data["Wealth"].values, agent_data["Savings"].values, label="Wealth vs Savings")
+            plt.xlabel("Wealth")
+            plt.ylabel("Savings")
+            plt.title(f"{profile_name} - R={interest_rate} - Wealth vs Savings")  # Add to title
+            plt.legend()
+
+            plt.tight_layout()
+            # Save the figure to a file
+            plot_filename = f"output/{profile_name}_R{interest_rate}_plots.png"
+            plt.savefig(plot_filename)
+            plt.close()  # Close the figure to free up memory
+
+sys.stdout = sys.__stdout__ #resets to printing to console
+
+print(f"Simulation output saved to: {output_file_path}")
