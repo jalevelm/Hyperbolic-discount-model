@@ -35,7 +35,7 @@ class SavingAgent(Agent):
     def step(self):
         if self.step_count == 0:
             print(f"Agent {self.unique_id}: First Step - Beta: {self.beta}, Delta: {self.delta}, R_star: {self.R_star}")
-        self.step_count += 1
+        
         print(f"Agent {self.unique_id}: Step start. Wealth: {self.wealth}, Previous Savings: {self.previous_savings}")
         print(f"Agent {self.unique_id}: R = {self.model.interest_rate}, R_star = {self.R_star}")
 
@@ -84,6 +84,15 @@ class SavingAgent(Agent):
         consumption = self.model.interest_rate * self.wealth - self.savings
         consumption = max(consumption, 1e-9)  # Ensure positive consumption
 
+        #--R* check---
+        if self.model.interest_rate > self.R_star:
+            # Agent SHOULD be saving (or at worst, be indifferent at k_t+1 = k_t)
+            self.savings = max(self.savings, self.previous_wealth)  # Ensure k_t+1 >= k_t
+
+        elif self.model.interest_rate < self.R_star:
+            # Agent SHOULD be dissaving to the borrowing limit
+            self.savings = self.borrowing_limit 
+
 
         # --- Debugging Prints (Once per Step) ---
         print(f"Agent {self.unique_id}: Step {self.step_count}")
@@ -98,6 +107,7 @@ class SavingAgent(Agent):
         self.wealth = self.savings # Wealth in next period is savings from this period.
         self.previous_savings = self.savings
         print(f"Agent {self.unique_id}: Step end.  Wealth: {self.wealth:.2f}, Savings: {self.savings:.2f}, Consumption: {consumption:.2f}")
+        self.step_count += 1
 
     def utility(self, consumption):
         """
@@ -162,7 +172,7 @@ class SavingModel(Model):
         self.borrowing_limit = 0
         self.wealth_dist = wealth_dist
         self.create_agent(agent_profile)
-        self.wealth_grid = np.linspace(0, self.max_wealth, 500) # Increased density, adjusted range
+        self.wealth_grid = np.linspace(1e-6, self.max_wealth, 500) # Increased density, adjusted range
 
 
         # Data collection
