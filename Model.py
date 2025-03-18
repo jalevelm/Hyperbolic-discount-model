@@ -46,10 +46,12 @@ class SavingAgent(Agent):
             print(f"Agent {self.unique_id}: Starting value iteration...")
             V = np.zeros_like(wealth_grid)
             g = np.zeros_like(wealth_grid)
-            iterations = 500  # Increased iterations
+            iterations = 1000  # Increased iterations
             tolerance = 1e-6  # Tighter tolerance
+            iteration_count = 0
 
             for _ in range(iterations):
+                iteration_count += 1 
                 V_old = V.copy()
                 for i, k_val in enumerate(wealth_grid):
                     continuation_value, next_k, _ = self.optimize_savings(k_val, V, wealth_grid)
@@ -59,39 +61,25 @@ class SavingAgent(Agent):
                     g[i] = next_k
 
                 if np.any(np.isnan(V)):
-                    print(f"Agent {self.unique_id}: NaN detected in V after iteration {_}!")
+                    print(f"Agent {self.unique_id}: NaN detected in V after iteration {iteration_count}!")
                     break
 
+                if np.any(np.abs(V) > 1e6):
+                    print(f"Agent {self.unique_id}: Value function is likely diverging at iteration {iteration_count}!")
+                    raise ValueError("Value function is likely diverging!")
+
                 if np.max(np.abs(V - V_old)) < tolerance:
-                    print(f"Agent {self.unique_id}: Value function converged after {_} iterations.")
-                    break
+                    print(f"Agent {self.unique_id}: Value function converged after {iteration_count} iterations.")
+                    break    
             else:
-                print(f"Agent {self.unique_id}: Value function DID NOT converge after {iterations} iterations.")
+                print(f"Agent {self.unique_id}: Value function DID NOT converge after {iteration_count} iterations.")
 
             self.V = V
             self.g = g
             self.value_function_calculated = True
 
-            '''# --- Plot Value and Policy Functions (after value iteration) ---
-            plt.figure(figsize=(10, 5))
-            plt.subplot(1, 2, 1)
-            plt.plot(wealth_grid, self.V)
-            plt.title(f"Agent {self.unique_id}: Value Function")
-            plt.xlabel("Wealth (k)")
-            plt.ylabel("V(k)")
-
-            plt.subplot(1, 2, 2)
-            plt.plot(wealth_grid, self.g)
-            plt.axhline(y=0, color='r', linestyle='--') # Add horizontal line at y=0
-            plt.title(f"Agent {self.unique_id}: Policy Function")
-            plt.xlabel("Current Wealth (k)")
-            plt.ylabel("Next Period Wealth (g(k))")
-            plt.plot(wealth_grid, wealth_grid, color='green', linestyle=':', label = '45 degree line')
-            plt.legend()
-            plt.show() '''
-
-        # Agent's Decision (using pre-calculated policy function)
-        self.savings = np.interp(self.wealth, wealth_grid, self.g)  # Interpolate!
+        # Agent's Decision 
+        self.savings = np.interp(self.wealth, wealth_grid, self.g) 
         self.savings = np.clip(self.savings, self.borrowing_limit, self.model.interest_rate * self.wealth)
         consumption = self.model.interest_rate * self.wealth - self.savings
         consumption = max(consumption, 1e-9)  # Ensure positive consumption
