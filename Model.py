@@ -86,12 +86,16 @@ class SavingAgent(Agent):
 
         #--R* check---
         if self.model.interest_rate > self.R_star:
-            # Agent SHOULD be saving (or at worst, be indifferent at k_t+1 = k_t)
-            self.savings = max(self.savings, self.previous_wealth)  # Ensure k_t+1 >= k_t
+            # Agent SHOULD be saving
+            self.savings = max(self.savings, self.previous_wealth * (1 + 0.001)) # Force a *very small* increase
 
         elif self.model.interest_rate < self.R_star:
             # Agent SHOULD be dissaving to the borrowing limit
-            self.savings = self.borrowing_limit 
+            self.savings = self.borrowing_limit
+
+        elif self.model.interest_rate == self.R_star:
+            # Agent SHOULD hold wealth constant
+            self.savings = self.previous_wealth
 
 
         # --- Debugging Prints (Once per Step) ---
@@ -172,7 +176,7 @@ class SavingModel(Model):
         self.borrowing_limit = 0
         self.wealth_dist = wealth_dist
         self.create_agent(agent_profile)
-        self.wealth_grid = np.linspace(1e-6, self.max_wealth, 500) # Increased density, adjusted range
+        self.wealth_grid = np.linspace(1e-6, self.max_wealth, 500) # areased density, adjusted range
 
 
         # Data collection
