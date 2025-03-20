@@ -121,8 +121,8 @@ class SavingAgent(Agent):
             g = np.zeros_like(wealth_grid)
 
             # --- Value Iteration Algorithm ---
-            iterations = 1000  # Maximum number of iterations
-            tolerance = 1e-6  # Convergence tolerance
+            iterations = 2000  # Maximum number of iterations
+            tolerance = 1e-10  # Convergence tolerance
             iteration_count = 0   # Iteration counter
 
             for _ in range(iterations):
@@ -168,10 +168,12 @@ class SavingAgent(Agent):
 
          # Find the index in the wealth grid that is closest to the agent's current wealth
         wealth_index = np.argmin(np.abs(wealth_grid - self.wealth))
-        self.savings = self.g[wealth_index] # Look up optimal savings in policy function
+        optimal_savings = self.g[wealth_index] # Look up optimal savings in policy function
          # Clip savings to ensure it's within feasible bounds (borrowing limit and max possible wealth)
-        self.savings = np.clip(self.savings, self.borrowing_limit, self.model.interest_rate * self.wealth)
+        self.savings = np.clip(optimal_savings, self.borrowing_limit, self.model.interest_rate * self.wealth)
 
+        
+        '''
         # --- R* Check and Savings Adjustment  ---
         # The following block attempts to enforce the theoretical saving/dissaving
         # behavior based on the comparison of the interest rate (R) and the
@@ -185,6 +187,7 @@ class SavingAgent(Agent):
         elif self.model.interest_rate == self.R_star:
             # Agent SHOULD hold wealth constant
             self.savings = self.previous_wealth
+        '''
 
         # Calculate consumption based on the budget constraint
         consumption = self.model.interest_rate * self.wealth - self.savings
@@ -194,7 +197,8 @@ class SavingAgent(Agent):
         # --- Debugging Prints (End of Step) ---
         print(f"Agent {self.unique_id}: Step {self.step_count}")
         print(f"  Previous Wealth: {self.previous_wealth:.4f}")
-        print(f"  Calculated Savings: {self.savings:.4f}")
+        print(f"  Optimal Savings (before clipping): {optimal_savings:.4f}")  
+        print(f"  Calculated Savings (after clipping): {self.savings:.4f}")
         print(f"  New Wealth: {self.wealth:.4f}")
         print(f"  Consumption: {consumption:.4f}")
 
@@ -412,7 +416,7 @@ class SavingModel(Model):
 
         # --- Create the Wealth Grid ---
         # A discrete set of wealth levels used for value function iteration.
-        self.wealth_grid = np.linspace(1e-6, self.max_wealth, 500) 
+        self.wealth_grid = np.linspace(1e-6, self.max_wealth, 1000) 
 
 
         # --- Create the Agent ---
@@ -517,7 +521,7 @@ with open(output_file_path, "w") as output_file:
         for interest_rate in [1.01, 1.02, 1.03, 1.04, 1.05, 1.06, 1.07, 1.10, 1.20, 1.30]:  # Example interest rates
             print(f"\n--- Interest Rate: {interest_rate} ---")
             model = SavingModel(profile, interest_rate, sigma, wealth_dist)
-            for i in range(10):  # Number of steps
+            for i in range(5):  # Number of steps
                 model.step()
 
             # Analyze data and plot
