@@ -5,6 +5,7 @@ from mesa.time import RandomActivation
 from mesa.space import MultiGrid
 from mesa.datacollection import DataCollector  
 import random
+import time
 import numpy as np
 import matplotlib.pyplot as plt
 import scipy.optimize as optimize  
@@ -121,13 +122,20 @@ class SavingAgent(Agent):
             g = np.zeros_like(wealth_grid)
 
             # --- Value Iteration Algorithm ---
-            iterations = 2000  # Maximum number of iterations
+            iterations = 10000  # Maximum number of iterations
             tolerance = 1e-10  # Convergence tolerance
             iteration_count = 0   # Iteration counter
+
+            total_optimization_time = 0  # Accumulate optimization times
+            total_inner_loop_time = 0
+
+            outer_loop_start_time = time.time()
 
             for _ in range(iterations):
                 iteration_count += 1 
                 V_old = V.copy()    # Store the previous iteration's value function
+
+                inner_loop_start_time = time.time()
 
                 # Iterate over all possible wealth levels in the grid
                 for i, k_val in enumerate(wealth_grid):
@@ -140,10 +148,16 @@ class SavingAgent(Agent):
                     consumption = max(consumption, 1e-9)    # Ensure consumption >= 0
 
                     # Update the value function: current utility + discounted future utility
-                    V[i] = self.utility(consumption) + self.beta * continuation_value
+                    V[i] = self.utility(consumption) + self.delta * continuation_value                                       #or self.beta
                     g[i] = next_k # Store the optimal next-period wealth (savings)
 
+                inner_loop_end_time = time.time()
+                total_inner_loop_time += (inner_loop_end_time - inner_loop_start_time)
+
                 # --- Convergence Check ---
+
+                diff = np.max(np.abs(V - V_old))
+                
                 if np.any(np.isnan(V)):   # Check for numerical instability
                     print(f"Agent {self.unique_id}: NaN detected in V after iteration {iteration_count}!")
                     break
@@ -152,12 +166,24 @@ class SavingAgent(Agent):
                     print(f"Agent {self.unique_id}: Value function is likely diverging at iteration {iteration_count}!")
                     raise ValueError("Value function is likely diverging")
 
-                if np.max(np.abs(V - V_old)) < tolerance:   # Check for convergence
+                if diff < tolerance:   # Check for convergence
                     print(f"Agent {self.unique_id}: Value function converged after {iteration_count} iterations.")
                     break    
             else:
                 # Executed if the loop completes without breaking (no convergence)
                 print(f"Agent {self.unique_id}: Value function DID NOT converge after {iteration_count} iterations.")
+
+            outer_loop_end_time = time.time()
+            total_value_iteration_time = outer_loop_end_time - outer_loop_start_time
+
+            average_optimization_time = total_optimization_time / (iteration_count * len(wealth_grid)) if iteration_count > 0 else 0
+            average_inner_loop_time = total_inner_loop_time / iteration_count if iteration_count > 0 else 0
+
+
+            print(f"Agent {self.unique_id}: Total value iteration took {total_value_iteration_time:.6f} seconds")
+            print(f"Agent {self.unique_id}: Average optimization time: {average_optimization_time:.8f} seconds")
+            print(f"Agent {self.unique_id}: Average inner loop time: {average_inner_loop_time:.6f} seconds")
+
 
             # Store the calculated value and policy functions
             self.V = V
@@ -272,6 +298,7 @@ class SavingAgent(Agent):
 
                 Returns (0, k, 0) if the optimization fails.
         """
+        optimization_full_start_time = time.time() #added timer
         beta = self.beta    # Present bias parameter
         delta = self.delta  # Discount factor
         R = self.model.interest_rate   # Gross interest rate
@@ -334,7 +361,7 @@ class SavingAgent(Agent):
 
             # Calculate the continuation value (discounted future utility)
             # at the optimal next-period wealth.
-            continuation_value = delta * np.interp(optimal_k_next, wealth_grid, V)
+            continuation_value = np.interp(optimal_k_next, wealth_grid, V)                        #continuation_value = delta * np.interp(optimal_k_next, wealth_grid, V)
 
             # Calculate consumption based on the optimal savings choice.
             final_consumption = R * k - optimal_k_next
@@ -404,7 +431,7 @@ class SavingModel(Model):
         self.num_agents = 1  #Number of agents
         self.interest_rate = interest_rate  # Constant gross interest rate
         self.sigma = sigma  # inv. of intertemporal substitution
-        self.max_wealth = 50000000  # Upper bound for the wealth grid
+        self.max_wealth = 10000000  # Upper bound for the wealth grid
         self.borrowing_limit = 0    # Lower bound for wealth (no borrowing)
         self.wealth_dist = wealth_dist  # Initial wealth distribution
 
@@ -416,7 +443,7 @@ class SavingModel(Model):
 
         # --- Create the Wealth Grid ---
         # A discrete set of wealth levels used for value function iteration.
-        self.wealth_grid = np.linspace(1e-6, self.max_wealth, 1000) 
+        self.wealth_grid = np.linspace(1e-6, self.max_wealth, 10000) 
 
 
         # --- Create the Agent ---
@@ -521,7 +548,7 @@ with open(output_file_path, "w") as output_file:
         for interest_rate in [1.01, 1.02, 1.03, 1.04, 1.05, 1.06, 1.07, 1.10, 1.20, 1.30]:  # Example interest rates
             print(f"\n--- Interest Rate: {interest_rate} ---")
             model = SavingModel(profile, interest_rate, sigma, wealth_dist)
-            for i in range(5):  # Number of steps
+            for i in range(3):  # Number of steps
                 model.step()
 
             # Analyze data and plot
