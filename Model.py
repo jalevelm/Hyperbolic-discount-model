@@ -122,8 +122,8 @@ class SavingAgent(Agent):
             g = np.zeros_like(wealth_grid)
 
             # --- Value Iteration Algorithm ---
-            iterations = 10000  # Maximum number of iterations
-            tolerance = 1e-10  # Convergence tolerance
+            iterations = 1000  # Maximum number of iterations
+            tolerance = 1e-6  # Convergence tolerance
             iteration_count = 0   # Iteration counter
 
             total_optimization_time = 0  # Accumulate optimization times
@@ -431,7 +431,7 @@ class SavingModel(Model):
         self.num_agents = 1  #Number of agents
         self.interest_rate = interest_rate  # Constant gross interest rate
         self.sigma = sigma  # inv. of intertemporal substitution
-        self.max_wealth = 10000000  # Upper bound for the wealth grid
+        self.max_wealth = 1000000  # Upper bound for the wealth grid
         self.borrowing_limit = 0    # Lower bound for wealth (no borrowing)
         self.wealth_dist = wealth_dist  # Initial wealth distribution
 
@@ -443,7 +443,7 @@ class SavingModel(Model):
 
         # --- Create the Wealth Grid ---
         # A discrete set of wealth levels used for value function iteration.
-        self.wealth_grid = np.linspace(1e-6, self.max_wealth, 10000) 
+        self.wealth_grid = np.linspace(1e-6, self.max_wealth, 2000) 
 
 
         # --- Create the Agent ---
