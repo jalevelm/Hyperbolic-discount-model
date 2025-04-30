@@ -10,7 +10,7 @@ import numpy as np
 import matplotlib.pyplot as plt
 import scipy.optimize as optimize  
 from joblib import Parallel, delayed
-
+import pandas as pd
 
 class SavingAgent(Agent):
     """
@@ -122,7 +122,7 @@ class SavingAgent(Agent):
             g = np.zeros_like(wealth_grid)
 
             # --- Value Iteration Algorithm ---
-            iterations = 1000  # Maximum number of iterations
+            iterations = 50  # Maximum number of iterations
             tolerance = 1e-6  # Convergence tolerance
             iteration_count = 0   # Iteration counter
 
@@ -443,23 +443,42 @@ class SavingModel(Model):
 
         # --- Create the Wealth Grid ---
         # A discrete set of wealth levels used for value function iteration.
-        self.wealth_grid = np.linspace(1e-6, self.max_wealth, 2000) 
+        self.wealth_grid = np.linspace(1e-6, self.max_wealth, 100) 
 
 
         # --- Create the Agent ---
         self.create_agent(agent_profile)    # Create and add the agent
 
         # --- Data Collection ---
+        # Define consumption calculation carefully based on when savings are decided
+        # Consumption in step t depends on wealth at start of t (which is savings from t-1)
+        # and savings chosen in step t (which becomes wealth at start of t+1).
+        def get_consumption(agent):
+            # Ensure previous_wealth is not None (can happen before first step completes fully)
+            if agent.previous_wealth is None:
+                return 0 # Or some other placeholder like np.nan
+            consumption = agent.model.interest_rate * agent.previous_wealth - agent.savings
+            return max(consumption, 1e-9) # Ensure non-negative
+
+        def get_utility(agent):
+             consumption = get_consumption(agent)
+             # Handle cases where consumption might lead to invalid utility (e.g., log(0))
+             utility_val = agent.utility(consumption)
+             if not np.isfinite(utility_val):
+                 # print(f"Warning: Non-finite utility calculated ({utility_val}) for consumption {consumption}. Returning NaN.")
+                 return np.nan # Return NaN or 0 if utility is invalid
+             return utility_val
+
+
         self.datacollector = DataCollector(
             agent_reporters={
-                "Wealth": "wealth",
-                "Savings": "savings",
-                # Calculate consumption using the budget constraint.
-                "Consumption": lambda a: a.model.interest_rate * a.previous_wealth - a.savings,
+                "Wealth": "wealth", # Wealth at the *end* of the step (i.e., next period's start)
+                "Savings": "savings", # Savings chosen *during* the step
+                "Consumption": get_consumption, # Consumption *during* the step
                 "R_star": "R_star",
                 "Interest_Rate": lambda a: a.model.interest_rate,
-                # Calculate utility from consumption.
-                "Utility": lambda a: a.utility(a.model.interest_rate * a.previous_wealth - a.savings),
+                "Utility": get_utility, # Utility from consumption *during* the step
+                "Previous_Wealth": "previous_wealth" 
             }
         )
         print("Model initialized")
@@ -513,7 +532,7 @@ class SavingModel(Model):
         self.schedule.step()    # Advance the agent (and scheduler)
         print("Model step end")  # Debug print
 
-# ---------------------------------------------------------- Model run ------------------------------------------------------------------------
+# ---------------------------------------------------------- Model run block ------------------------------------------------------------------------
 
 # --- Define Agent Profiles ---
 agent_profiles = {
@@ -526,91 +545,346 @@ agent_profiles = {
 sigma = 0.4387 # elasticity of satisfaction
 
 wealth_dist = [
-    (0.41520521, (0, 9999)),  # Less than 10,000 USD
-    (0.477205824, (10000, 99999)),  # Between 10,000 and 100,000 USD
-    (0.103122194, (100000, 999999)),  # Between 100,000 and 1,000,000 USD
-    (0.004466772, (1000000, 10000000))  # More than 1,000,000 USD 
+    (0.4152, (0, 9999)),  # Less than 10,000 USD
+    (0.4772, (10000, 99999)),  # Between 10,000 and 100,000 USD
+    (0.1031, (100000, 999999)),  # Between 100,000 and 1,000,000 USD
+    (0.0045, (1000000, 10000000))  # More than 1,000,000 USD 
 ]
 
-# --- Redirect Output to File ---
-output_dir = "output"
-os.makedirs(output_dir, exist_ok=True)  # Create the directory if it doesn't exist
-output_file_path = os.path.join(output_dir, "simulation_output.txt")
+# --- Define Interest Rates to Simulate ---
+interest_rates_to_simulate = [1.01, 1.10, 1.20, 1.30] # Example interest rates (Gross Rate R)
 
+# --- Define Simulation Steps ---
+simulation_steps = 5 # Number of steps per simulation run
+
+# --- Setup Output Directories ---
+output_dir_text = "output_text" # Directory for text log
+output_dir_plots = "output_plots" # Directory for plot images
+os.makedirs(output_dir_text, exist_ok=True)
+os.makedirs(output_dir_plots, exist_ok=True)
+output_file_path = os.path.join(output_dir_text, "simulation_output.txt")
+
+# --- Data Storage Structure ---
+# Dictionary: { profile_name -> { interest_rate -> pandas_dataframe } }
+results_data = {profile_name: {} for profile_name in agent_profiles.keys()}
+# Store agent objects temporarily if needed for V/g plots
+agent_instances = {profile_name: {} for profile_name in agent_profiles.keys()}
+
+
+# --- Redirect Output to File ---
+print(f"Redirecting simulation stdout log to: {output_file_path}")
 with open(output_file_path, "w") as output_file:
+    original_stdout = sys.stdout # Store original stdout
     sys.stdout = output_file  # Redirect standard output to the file
 
-# -------------------------------------------------------- Run Simulation-----------------------
+# --------------------------------------------------------
+# --- Phase 1: Run Simulations & Collect Data ----------
+# --------------------------------------------------------
+    print("="*70)
+    print("Starting Simulation Runs")
+    print("="*70)
+
+    # Loop through agent profiles first
     for profile_name, profile in agent_profiles.items():
-        print(f"\n                                                                                    ----- Running Simulations for {profile_name} -----")
+        print(f"\n===== Running Simulations for Profile: {profile_name} =====")
+        print(f"Profile parameters: Beta={profile['beta']}, Delta={profile['delta']}")
 
-        # Test different interest rates
-        for interest_rate in [1.01, 1.02, 1.03, 1.04, 1.05, 1.06, 1.07, 1.10, 1.20, 1.30]:  # Example interest rates
-            print(f"\n--- Interest Rate: {interest_rate} ---")
-            model = SavingModel(profile, interest_rate, sigma, wealth_dist)
-            for i in range(3):  # Number of steps
-                model.step()
+        # Then loop through interest rates for this profile
+        for interest_rate in interest_rates_to_simulate:
+            print(f"\n--- Interest Rate (R): {interest_rate:.2f} ---")
+            start_time_sim = time.time()
 
-            # Analyze data and plot
-            agent = model.schedule.agents[0]
-            if agent.value_function_calculated:     # Check if value iteration ran
+            # --- Initialize and Run Model ---
+            try:
+                model = SavingModel(profile, interest_rate, sigma, wealth_dist)
+                # Run the simulation for the specified number of steps
+                for i in range(simulation_steps):
+                    # print(f"  Step {i+1}/{simulation_steps}") # Keep commented for brevity unless needed
+                    model.step()
+
+                # --- Data Retrieval and Storage ---
                 agent_data = model.datacollector.get_agent_vars_dataframe()
-                plt.figure(figsize=(10, 5))
+
+                # Store the collected data (pandas DataFrame)
+                results_data[profile_name][interest_rate] = agent_data
+                # Store the agent instance (needed for V and g plots)
+                # Assumes only one agent with unique_id 0 exists
+                agent_instances[profile_name][interest_rate] = model.schedule.agents[0]
+
+                end_time_sim = time.time()
+                print(f"Simulation for R={interest_rate:.2f} completed in {end_time_sim - start_time_sim:.2f} seconds.")
+                print(f"Final Wealth: {agent_data['Wealth'].iloc[-1]:.2f}")
+
+            except Exception as e:
+                 print(f"\n!!!!!! ERROR during simulation for Profile: {profile_name}, R={interest_rate} !!!!!!")
+                 print(f"Error type: {type(e).__name__}")
+                 print(f"Error message: {e}")
+                 import traceback
+                 print("Traceback:")
+                 traceback.print_exc(file=output_file) # Print traceback to the log file
+                 # Store None to indicate failure for this run
+                 results_data[profile_name][interest_rate] = None
+                 agent_instances[profile_name][interest_rate] = None
+                 print("!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!")
+
+
+    print("\n" + "="*70)
+    print("All Simulation Runs Completed")
+    print("="*70 + "\n")
+
+
+# --------------------------------------------------------
+# --- Phase 2: Generate Plots --------------------------
+# --------------------------------------------------------
+    print("="*70)
+    print("Generating Plots")
+    print("="*70)
+
+    # --- Plot 1: Value and Policy Functions (One per profile/rate) ---
+    # [ This section remains unchanged - keep as is ]
+    print("\n--- Generating Value/Policy Function Plots ---")
+    for profile_name in agent_profiles.keys():
+        for interest_rate in interest_rates_to_simulate:
+            agent = agent_instances[profile_name].get(interest_rate) 
+            # Check if agent exists and VFI was completed
+            if agent and agent.value_function_calculated:
+                model = agent.model # Get model reference from agent for wealth_grid
+                plt.figure(figsize=(12, 5)) # Slightly wider figure
+
+                # Plot Value Function
                 plt.subplot(1, 2, 1)
-                plt.plot(model.wealth_grid, agent.V)
-                plt.title(f"Agent {agent.unique_id}: Value Function ({profile_name}, R={interest_rate})")
+                plt.plot(model.wealth_grid, agent.V, label=f'V(k)')
+                plt.title(f"Value Function V(k)\nProfile: {profile_name}, R={interest_rate:.2f}")
                 plt.xlabel("Wealth (k)")
-                plt.ylabel("V(k)")
+                plt.ylabel("Value V(k)")
+                plt.grid(True, linestyle=':', alpha=0.6)
+                plt.ticklabel_format(style='sci', axis='x', scilimits=(0,0)) # Use sci notation if numbers large
 
+                # Plot Policy Function
                 plt.subplot(1, 2, 2)
-                plt.plot(model.wealth_grid, agent.g)
-                plt.plot(model.wealth_grid, model.wealth_grid, color='red', linestyle='--', label="45-degree line")
-                plt.title(f"Agent {agent.unique_id}: Policy Function ({profile_name}, R={interest_rate})")
+                plt.plot(model.wealth_grid, agent.g, label='g(k) - Savings Policy')
+                # Plot 45-degree line for reference (k_next = k)
+                plt.plot(model.wealth_grid, model.wealth_grid, color='red', linestyle='--', linewidth=1, label="k'=k (45-degree line)")
+                plt.title(f"Policy Function g(k) (Savings)\nProfile: {profile_name}, R={interest_rate:.2f}")
                 plt.xlabel("Current Wealth (k)")
-                plt.ylabel("Next Period Wealth (g(k))")
+                plt.ylabel("Next Period Wealth (k') = Savings")
                 plt.legend()
-                plot_filename = f"output/{profile_name}_R{interest_rate}_value_policy_plots.png" #Saving plots
-                plt.savefig(plot_filename)
-                plt.close()
+                plt.grid(True, linestyle=':', alpha=0.6)
+                plt.ticklabel_format(style='sci', axis='x', scilimits=(0,0))
+                plt.ticklabel_format(style='sci', axis='y', scilimits=(0,0))
+
+                plt.tight_layout(rect=[0, 0.03, 1, 0.95]) # Adjust layout slightly if titles overlap
+                # Saving plots to the specified directory
+                plot_filename_vg = os.path.join(output_dir_plots, f"{profile_name}_R{interest_rate:.2f}_ValuePolicy.png")
+                try:
+                    plt.savefig(plot_filename_vg)
+                    # print(f"Saved Value/Policy plot: {plot_filename_vg}") # Keep commented unless needed
+                except Exception as e:
+                    print(f"Error saving plot {plot_filename_vg}: {e}")
+                plt.close() # Close the figure to free memory
+            elif agent is None:
+                 # print(f"Skipping Value/Policy plot for {profile_name}, R={interest_rate:.2f} (Simulation Error)") # Keep commented unless needed
+                 pass # Pass silently
+            #else:
+                 # print(f"Skipping Value/Policy plot for {profile_name}, R={interest_rate:.2f} (VFI not run or agent missing)") # Keep commented unless needed
 
 
-            plt.figure(figsize=(12, 8))
+    # --- Plot 2: Combined Time Series Plots (One per interest rate) ---
+    print("\n--- Generating Combined Time Series Plots (Now 3x2 Layout) ---")
+    # Use a color cycle for different profiles
+    colors = plt.cm.viridis(np.linspace(0, 1, len(agent_profiles))) # Example color map
+    profile_colors = {name: colors[i] for i, name in enumerate(agent_profiles.keys())}
 
-            plt.subplot(2, 2, 1)
-            plt.plot(agent_data["Wealth"].values, label="Wealth")
-            plt.plot(agent_data["Savings"].values, label="Savings")
-            plt.xlabel("Time")
-            plt.ylabel("Amount")
-            plt.title(f"{profile_name} - R={interest_rate} - Wealth & Savings") # Add to title
-            plt.legend()
+    # Loop through each interest rate to create a combined plot
+    for interest_rate in interest_rates_to_simulate:
+        print(f"  Generating combined plot for R = {interest_rate:.2f}")
+        # ***** CHANGE: Update layout to 3 rows, 2 columns *****
+        fig, axes = plt.subplots(3, 2, figsize=(14, 18)) # Adjust figsize if needed
+        fig.suptitle(f"Simulation Time Series Results (R = {interest_rate:.2f})", fontsize=16)
+        axes = axes.flatten() # Flatten axes array for easier indexing (now 6 axes: 0-5)
 
-            plt.subplot(2, 2, 2)
-            plt.plot(agent_data["Consumption"].values, label="Consumption")
-            plt.xlabel("Time")
-            plt.ylabel("Consumption")
-            plt.title(f"{profile_name} - R={interest_rate} - Consumption")  # Add to title
-            plt.legend()
+        plot_successful = False # Flag to check if any data was plotted for this rate
+        # ***** CHANGE: Track plotted profiles for 6 subplots *****
+        plotted_profiles_on_subplot = [set() for _ in range(6)]
 
-            plt.subplot(2, 2, 3)
-            plt.plot(agent_data["Utility"].values, label="Utility")
-            plt.xlabel("Time")
-            plt.ylabel("Utility")
-            plt.title(f"{profile_name} - R={interest_rate} - Utility")  # Add to title
-            plt.legend()
+        # --- Data storage for the bar chart for this interest rate ---
+        profile_names_for_bar = []
+        summed_savings_for_bar = []
+        # ----------------------------------------------------------
 
-            plt.subplot(2, 2, 4)
-            plt.plot(agent_data["Wealth"].values, agent_data["Savings"].values, label="Wealth vs Savings")
-            plt.xlabel("Wealth")
-            plt.ylabel("Savings")
-            plt.title(f"{profile_name} - R={interest_rate} - Wealth vs Savings")  # Add to title
-            plt.legend()
+        # Loop through each profile to plot its data on the current figure
+        for profile_index, profile_name in enumerate(agent_profiles.keys()):
+            # Retrieve the dataframe for this profile and interest rate
+            agent_data = results_data[profile_name].get(interest_rate) # Use .get for safety
+
+            # Check if data exists (simulation might have failed)
+            if agent_data is not None and not agent_data.empty:
+                color = profile_colors[profile_name] # Get color for this profile
+
+                # Explicitly convert data before plotting and handle potential errors
+                try:
+                    # Get Step values from index level 0
+                    x_step_data = agent_data.index.get_level_values(0)
+
+                    # Convert relevant Y-data columns to numeric, raising error on failure
+                    y_prev_wealth_data = pd.to_numeric(agent_data["Previous_Wealth"], errors='raise')
+                    y_savings_data = pd.to_numeric(agent_data["Savings"], errors='raise')
+                    y_consumption_data = pd.to_numeric(agent_data["Consumption"], errors='raise')
+                    y_utility_data = pd.to_numeric(agent_data["Utility"], errors='raise')
+
+                    # Calculate cumulative savings
+                    y_cumulative_savings = y_savings_data.cumsum()
+
+                    # --- Subplot 1 (axes[0]): Wealth & Savings ---
+                    axes[0].plot(x_step_data, y_prev_wealth_data, marker='o', linestyle='-', color=color, label=f"{profile_name} Wealth") # Simplified label
+                    axes[0].plot(x_step_data, y_savings_data, marker='x', linestyle='--', color=color, label=f"{profile_name} Savings") # Simplified label
+                    axes[0].set_title("Wealth (Start) and Savings (Decision)")
+                    axes[0].set_xlabel("Time Step")
+                    axes[0].set_ylabel("Amount ($)")
+                    axes[0].grid(True, linestyle=':', alpha=0.6)
+                    axes[0].ticklabel_format(style='sci', axis='y', scilimits=(0,0))
+                    plotted_profiles_on_subplot[0].add(profile_name) # Mark as plotted
+
+                    # --- Subplot 2 (axes[1]): Consumption ---
+                    axes[1].plot(x_step_data, y_consumption_data, marker='o', linestyle='-', color=color, label=f"{profile_name}")
+                    axes[1].set_title("Consumption")
+                    axes[1].set_xlabel("Time Step")
+                    axes[1].set_ylabel("Amount ($)")
+                    axes[1].grid(True, linestyle=':', alpha=0.6)
+                    axes[1].ticklabel_format(style='sci', axis='y', scilimits=(0,0))
+                    plotted_profiles_on_subplot[1].add(profile_name)
+
+                    # --- Subplot 3 (axes[2]): Utility ---
+                    axes[2].plot(x_step_data, y_utility_data, marker='o', linestyle='-', color=color, label=f"{profile_name}")
+                    axes[2].set_title("Period Utility")
+                    axes[2].set_xlabel("Time Step")
+                    axes[2].set_ylabel("Utility Value")
+                    axes[2].grid(True, linestyle=':', alpha=0.6)
+                    # Utility might not need sci notation unless sigma is very high/low
+                    plotted_profiles_on_subplot[2].add(profile_name)
+
+                    # ***** NEW: Subplot 4 (axes[3]): Cumulative Savings *****
+                    axes[3].plot(x_step_data, y_cumulative_savings, marker='o', linestyle='-', color=color, label=f"{profile_name}")
+                    axes[3].set_title("Cumulative Savings")
+                    axes[3].set_xlabel("Time Step")
+                    axes[3].set_ylabel("Total Savings Accumulated ($)")
+                    axes[3].grid(True, linestyle=':', alpha=0.6)
+                    axes[3].ticklabel_format(style='sci', axis='y', scilimits=(0,0))
+                    plotted_profiles_on_subplot[3].add(profile_name)
+
+                    # ***** CHANGE: Subplot 5 (axes[4]): Wealth (Start) vs Savings *****
+                    axes[4].plot(y_prev_wealth_data, y_savings_data, marker='o', linestyle='-', color=color, label=f"{profile_name}")
+                    axes[4].set_title("Wealth (Start) vs. Savings")
+                    axes[4].set_xlabel("Wealth at Start of Step ($)")
+                    axes[4].set_ylabel("Savings Chosen in Step ($)")
+                    axes[4].grid(True, linestyle=':', alpha=0.6)
+                    axes[4].ticklabel_format(style='sci', axis='x', scilimits=(0,0))
+                    axes[4].ticklabel_format(style='sci', axis='y', scilimits=(0,0))
+                    # Add 45 degree line for reference if scales allow (only label once per plot)
+                    if axes[4].has_data(): # Check if limits are valid before drawing line
+                        is_first_profile_on_subplot5 = not plotted_profiles_on_subplot[4] # Check before adding
+                        plotted_profiles_on_subplot[4].add(profile_name) # Mark profile as plotted *after* check
+                        try: # Getting limits might fail if data is weird
+                            min_val_x, max_val_x = axes[4].get_xlim()
+                            min_val_y, max_val_y = axes[4].get_ylim()
+                            min_val = min(min_val_x, min_val_y)
+                            max_val = max(max_val_x, max_val_y)
+                            if max_val > min_val: # Avoid plotting line if range is zero or invalid
+                                axes[4].plot([min_val, max_val], [min_val, max_val], color='grey', linestyle=':', linewidth=1, label="Savings = Wealth" if is_first_profile_on_subplot5 else None)
+                        except Exception as lim_err:
+                            print(f"    Warning: Could not draw 45-degree line on subplot 5 ({lim_err})")
+
+
+                    # --- Subplot 6 (axes[5]): Empty ---
+                    # Leave axes[5] empty or hide it
+                    axes[5].set_visible(False) # Hide the last unused subplot
+                    plotted_profiles_on_subplot[5].add(profile_name) # Mark anyway to keep loop consistent
+
+
+                    # --- Data for Bar Chart ---
+                    # Calculate sum of savings for this profile/rate
+                    total_s = y_savings_data.sum()
+                    profile_names_for_bar.append(profile_name)
+                    summed_savings_for_bar.append(total_s)
+                    # --------------------------
+
+                    plot_successful = True # Mark that at least one profile plotted successfully for this rate
+
+                except Exception as e:
+                    # Error during Y-data conversion or plotting for this profile
+                    print(f"    ERROR during Y-data conversion or plotting for {profile_name}, R={interest_rate}: {e}")
+                    # Print problematic Y-data
+                    if 'Previous_Wealth' in agent_data.columns: print(f"    Problematic Previous_Wealth ({type(agent_data['Previous_Wealth'])}): {agent_data['Previous_Wealth'].tolist()}")
+                    if 'Savings' in agent_data.columns: print(f"    Problematic Savings ({type(agent_data['Savings'])}): {agent_data['Savings'].tolist()}")
+                    if 'Consumption' in agent_data.columns: print(f"    Problematic Consumption ({type(agent_data['Consumption'])}): {agent_data['Consumption'].tolist()}")
+                    if 'Utility' in agent_data.columns: print(f"    Problematic Utility ({type(agent_data['Utility'])}): {agent_data['Utility'].tolist()}")
+                    # Continue to the next profile
+                    continue
+
+            # else: # Optional: print message if data is missing for a profile on this plot
+                 # print(f"  - No data found for profile '{profile_name}' at R={interest_rate:.2f}. Skipping.")
+
+
+        # --- Finalize and Save TIME SERIES Figure for this interest rate ---
+        if plot_successful:
+            # Add legends to each subplot where at least one profile was plotted
+            # ***** CHANGE: Loop through 6 potential subplots *****
+            for i in range(len(axes)): # Iterate through all axes
+                 if plotted_profiles_on_subplot[i]: # Check if any profile was successfully plotted on this subplot
+                     axes[i].legend(fontsize='x-small', loc='best') # Adjust legend props if needed
+
+            plt.tight_layout(rect=[0, 0.03, 1, 0.96]) # Adjust layout to prevent title overlap (top slightly lower for suptitle)
+
+            # Save the combined figure to the specified directory
+            plot_filename_ts = os.path.join(output_dir_plots, f"Combined_TimeSeries_R{interest_rate:.2f}.png")
+            try:
+                plt.savefig(plot_filename_ts)
+                print(f"  Saved combined time series plot: {plot_filename_ts}")
+            except Exception as e:
+                print(f"Error saving plot {plot_filename_ts}: {e}")
+            plt.close(fig) # Close the time series figure for this interest rate
+        else:
+            print(f"  Skipping combined time series plot for R={interest_rate:.2f} (no successful simulations found or plotted).")
+            plt.close(fig) # Close the empty figure
+
+
+        # ***** NEW: Generate and Save BAR CHART for this interest rate *****
+        if summed_savings_for_bar: # Check if we collected any data for the bar chart
+            print(f"  Generating total savings bar chart for R = {interest_rate:.2f}")
+            plt.figure(figsize=(10, 6)) # New figure for the bar chart
+
+            # Get colors corresponding to the profiles plotted
+            bar_colors = [profile_colors[p_name] for p_name in profile_names_for_bar]
+
+            plt.bar(profile_names_for_bar, summed_savings_for_bar, color=bar_colors)
+
+            plt.title(f"Total Savings Summed Over Time (R = {interest_rate:.2f})")
+            plt.xlabel("Agent Profile")
+            plt.ylabel("Total Savings ($)")
+            plt.grid(True, axis='y', linestyle=':', alpha=0.7)
+            plt.ticklabel_format(style='sci', axis='y', scilimits=(0,0)) # Use scientific notation if values large
+            plt.xticks(rotation=45, ha='right') # Rotate labels if they overlap
 
             plt.tight_layout()
-            # Save the figure to a file
-            plot_filename = f"output/{profile_name}_R{interest_rate}_plots.png"
-            plt.savefig(plot_filename)
-            plt.close()  # Close the figure to free up memory
 
-sys.stdout = sys.__stdout__ #resets to printing to console
+            # Save the bar chart figure
+            plot_filename_bar = os.path.join(output_dir_plots, f"TotalSavings_Bar_R{interest_rate:.2f}.png")
+            try:
+                plt.savefig(plot_filename_bar)
+                print(f"  Saved total savings bar chart: {plot_filename_bar}")
+            except Exception as e:
+                print(f"Error saving bar chart {plot_filename_bar}: {e}")
+            plt.close() # Close the bar chart figure
+        else:
+            print(f"  Skipping total savings bar chart for R={interest_rate:.2f} (no data collected).")
+        # ********************************************************************
 
-print(f"Simulation output saved to: {output_file_path}")
+
+    print("\n" + "="*70)
+    print("Plot Generation Complete")
+    print("="*70)
+
+# --- Restore Standard Output ---
+sys.stdout = original_stdout # Reset stdout to console
+print(f"\nSimulation stdout log saved to: {output_file_path}")
+print(f"Plots saved to directory: {output_dir_plots}")
