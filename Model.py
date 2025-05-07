@@ -105,18 +105,18 @@ class SavingAgent(Agent):
         """
 
         # --- Initialization (First Step Only) ---
-        if self.step_count == 0:
-            print(f"Agent {self.unique_id}: First Step - Beta: {self.beta}, Delta: {self.delta}, R_star: {self.R_star}")
+        if self.step_count == 0:    
+            print(f"Agent {self.unique_id}: First Step - Beta: {self.beta}, Delta: {self.delta}, R_star: {self.R_star}", flush=True)
         
         # --- Debugging Prints (Start of Step) ---
-        print(f"Agent {self.unique_id}: Step start. Wealth: {self.wealth}, Previous Savings: {self.previous_savings}")
-        print(f"Agent {self.unique_id}: R = {self.model.interest_rate}, R_star = {self.R_star}")
+        print(f"Agent {self.unique_id}: Step start. Wealth: {self.wealth}, Previous Savings: {self.previous_savings}", flush=True)
+        print(f"Agent {self.unique_id}: R = {self.model.interest_rate}, R_star = {self.R_star}", flush=True)
 
         wealth_grid = self.model.wealth_grid    # Access the pre-defined wealth grid
 
         # --- Value Function and Policy Function Calculation (One-Time) ---
         if not self.value_function_calculated:
-            print(f"Agent {self.unique_id}: Starting value iteration...")
+            #print(f"Agent {self.unique_id}: Starting value iteration...")
             # Initialize value and policy functions as NumPy arrays
             V = np.zeros_like(wealth_grid)
             g = np.zeros_like(wealth_grid)
@@ -131,14 +131,21 @@ class SavingAgent(Agent):
 
             outer_loop_start_time = time.time()
 
+            print(f"Agent {self.unique_id}: Starting value iteration with wealth_grid size {len(wealth_grid)} and max_iters {iterations}", flush=True)
+
             for _ in range(iterations):
                 iteration_count += 1 
                 V_old = V.copy()    # Store the previous iteration's value function
+                if iteration_count % 10 == 0: # Print progress every 10 VFI iterations
+                    print(f"Agent {self.unique_id}: VFI Iteration {iteration_count}/{iterations}", flush=True)
 
                 inner_loop_start_time = time.time()
 
                 # Iterate over all possible wealth levels in the grid
                 for i, k_val in enumerate(wealth_grid):
+                    if i % (len(wealth_grid) // 10) == 0 and iteration_count <=1 : # Print for a few grid points in the first VFI iteration
+                        print(f"Agent {self.unique_id}: VFI Iter {iteration_count}, Processing wealth_grid index {i}/{len(wealth_grid)}", flush=True)
+
                     # Find the optimal savings and continuation value using the
                     # current value function (V) and the agent's parameters.
                     continuation_value, next_k, _ = self.optimize_savings(k_val, V, wealth_grid)
@@ -159,19 +166,19 @@ class SavingAgent(Agent):
                 diff = np.max(np.abs(V - V_old))
                 
                 if np.any(np.isnan(V)):   # Check for numerical instability
-                    print(f"Agent {self.unique_id}: NaN detected in V after iteration {iteration_count}!")
+                    print(f"Agent {self.unique_id}: NaN detected in V after iteration {iteration_count}!", flush=True)
                     break
 
                 if np.any(np.abs(V) > 1e6): # Check for divergence
-                    print(f"Agent {self.unique_id}: Value function is likely diverging at iteration {iteration_count}!")
+                    print(f"Agent {self.unique_id}: Value function is likely diverging at iteration {iteration_count}!", flush=True)
                     raise ValueError("Value function is likely diverging")
 
                 if diff < tolerance:   # Check for convergence
-                    print(f"Agent {self.unique_id}: Value function converged after {iteration_count} iterations.")
+                    print(f"Agent {self.unique_id}: Value function converged after {iteration_count} iterations.", flush=True)
                     break    
             else:
                 # Executed if the loop completes without breaking (no convergence)
-                print(f"Agent {self.unique_id}: Value function DID NOT converge after {iteration_count} iterations.")
+                print(f"Agent {self.unique_id}: Value function DID NOT converge after {iteration_count} iterations.", flush=True)
 
             outer_loop_end_time = time.time()
             total_value_iteration_time = outer_loop_end_time - outer_loop_start_time
@@ -180,9 +187,9 @@ class SavingAgent(Agent):
             average_inner_loop_time = total_inner_loop_time / iteration_count if iteration_count > 0 else 0
 
 
-            print(f"Agent {self.unique_id}: Total value iteration took {total_value_iteration_time:.6f} seconds")
-            print(f"Agent {self.unique_id}: Average optimization time: {average_optimization_time:.8f} seconds")
-            print(f"Agent {self.unique_id}: Average inner loop time: {average_inner_loop_time:.6f} seconds")
+            print(f"Agent {self.unique_id}: Total value iteration took {total_value_iteration_time:.6f} seconds", flush=True)
+            print(f"Agent {self.unique_id}: Average optimization time: {average_optimization_time:.8f} seconds", flush=True)
+            print(f"Agent {self.unique_id}: Average inner loop time: {average_inner_loop_time:.6f} seconds", flush=True)
 
 
             # Store the calculated value and policy functions
@@ -221,18 +228,18 @@ class SavingAgent(Agent):
 
 
         # --- Debugging Prints (End of Step) ---
-        print(f"Agent {self.unique_id}: Step {self.step_count}")
-        print(f"  Previous Wealth: {self.previous_wealth:.4f}")
-        print(f"  Optimal Savings (before clipping): {optimal_savings:.4f}")  
-        print(f"  Calculated Savings (after clipping): {self.savings:.4f}")
-        print(f"  New Wealth: {self.wealth:.4f}")
-        print(f"  Consumption: {consumption:.4f}")
+        print(f"Agent {self.unique_id}: Step {self.step_count}", flush=True)
+        print(f"  Previous Wealth: {self.previous_wealth:.4f}", flush=True)
+        print(f"  Optimal Savings (before clipping): {optimal_savings:.4f}", flush=True)  
+        print(f"  Calculated Savings (after clipping): {self.savings:.4f}", flush=True)
+        print(f"  New Wealth: {self.wealth:.4f}", flush=True)
+        print(f"  Consumption: {consumption:.4f}", flush=True)
 
         # --- State Updates ---
         self.previous_wealth = self.wealth  # Store current wealth for next step
         self.wealth = self.savings  # Next period's wealth is this period's savings
         self.previous_savings = self.savings    # Store current savings for next step
-        print(f"Agent {self.unique_id}: Step end.  Wealth: {self.wealth:.2f}, Savings: {self.savings:.2f}, Consumption: {consumption:.2f}")
+        print(f"Agent {self.unique_id}: Step end.  Wealth: {self.wealth:.2f}, Savings: {self.savings:.2f}, Consumption: {consumption:.2f}", flush=True)
         self.step_count += 1    # Increment the step counter
 
     def utility(self, consumption):
@@ -373,7 +380,7 @@ class SavingAgent(Agent):
         else:
             # If the optimization failed, print an error message and return
             # default values.
-            print(f"Agent {self.unique_id}: Optimization FAILED for k={k}")
+            print(f"Agent {self.unique_id}: Optimization FAILED for k={k}", flush=True)
             print(result)   # Print the optimization result for debugging
             return 0, k, 0  # Return default values
 
@@ -431,7 +438,7 @@ class SavingModel(Model):
         self.num_agents = 1  #Number of agents
         self.interest_rate = interest_rate  # Constant gross interest rate
         self.sigma = sigma  # inv. of intertemporal substitution
-        self.max_wealth = 1000000  # Upper bound for the wealth grid
+        self.max_wealth = 10000000  # Upper bound for the wealth grid
         self.borrowing_limit = 0    # Lower bound for wealth (no borrowing)
         self.wealth_dist = wealth_dist  # Initial wealth distribution
 
@@ -481,7 +488,7 @@ class SavingModel(Model):
                 "Previous_Wealth": "previous_wealth" 
             }
         )
-        print("Model initialized")
+        print("Model initialized", flush=True)
 
     def create_agent(self, profile):
         """
@@ -491,7 +498,7 @@ class SavingModel(Model):
             profile (dict): A dictionary containing the agent's 'beta' and
                 'delta' values, defining its hyperbolic discounting preferences.
         """
-        print(f"Creating agent with profile: {profile}")
+        print(f"Creating agent with profile: {profile}", flush=True)
 
         # --- Determine Initial Wealth (based on wealth_dist) ---
         rand_num = random.random()  # Generate a random number between 0 and 1
@@ -515,7 +522,7 @@ class SavingModel(Model):
         agent = SavingAgent(0, self, profile["beta"], profile["delta"], init_wealth, self.sigma, self.borrowing_limit)
         self.schedule.add(agent)  # Add the agent to the scheduler
         self.grid.place_agent(agent, (0, 0))  # Place agent on grid (position irrelevant)
-        print(f"Agent created and added to schedule. Initial wealth: {init_wealth}")
+        print(f"Agent created and added to schedule. Initial wealth: {init_wealth}", flush=True)
        
 
 
@@ -527,19 +534,20 @@ class SavingModel(Model):
         1. Collecting data from the current state.
         2. Advancing the agent (which performs its saving/consumption decision).
         """
-        print("Model step start")  # Debug print
+        print("Model step start", flush=True)  # Debug print
         self.datacollector.collect(self)    # Collect data
         self.schedule.step()    # Advance the agent (and scheduler)
-        print("Model step end")  # Debug print
+        print("Model step end", flush=True)  # Debug print
 
 # ---------------------------------------------------------- Model run block ------------------------------------------------------------------------
 
 # --- Define Agent Profiles ---
 agent_profiles = {
-    "impulsive": {"beta": 0.6, "delta": 0.85},  # lower beta = more present bias, lower delta = less patient
     "planner": {"beta": 0.8, "delta": 0.98},  # Higher beta = less present bias, higer delta = more patient
-    "procrastinator": {"beta": 0.6, "delta": 0.98},  # low beta = more present bias, high delta = more patient, values also future consumption
     "moderate": {"beta": 0.7, "delta": 0.96},  # Base values
+    "procrastinator": {"beta": 0.6, "delta": 0.98},  # low beta = more present bias, high delta = more patient, values also future consumption
+    "inverse procrastinator": {"beta": 0.8, "delta": 0.85},
+    "impulsive": {"beta": 0.6, "delta": 0.85},  # lower beta = more present bias, lower delta = less patient
 }
 
 sigma = 0.4387 # elasticity of satisfaction
@@ -552,7 +560,7 @@ wealth_dist = [
 ]
 
 # --- Define Interest Rates to Simulate ---
-interest_rates_to_simulate = [1.01, 1.10, 1.20, 1.30] # Example interest rates (Gross Rate R)
+interest_rates_to_simulate = [1.01, 1.10, 1.20, 1.30] # interest rates (Gross Rate R)
 
 # --- Define Simulation Steps ---
 simulation_steps = 5 # Number of steps per simulation run
@@ -581,17 +589,17 @@ with open(output_file_path, "w") as output_file:
 # --- Phase 1: Run Simulations & Collect Data ----------
 # --------------------------------------------------------
     print("="*70)
-    print("Starting Simulation Runs")
+    print("Starting Simulation Runs", flush=True)
     print("="*70)
 
     # Loop through agent profiles first
     for profile_name, profile in agent_profiles.items():
-        print(f"\n===== Running Simulations for Profile: {profile_name} =====")
-        print(f"Profile parameters: Beta={profile['beta']}, Delta={profile['delta']}")
+        print(f"\n===== Running Simulations for Profile: {profile_name} =====", flush=True)
+        print(f"Profile parameters: Beta={profile['beta']}, Delta={profile['delta']}", flush=True)
 
         # Then loop through interest rates for this profile
         for interest_rate in interest_rates_to_simulate:
-            print(f"\n--- Interest Rate (R): {interest_rate:.2f} ---")
+            print(f"\n--- Interest Rate (R): {interest_rate:.2f} ---", flush=True)
             start_time_sim = time.time()
 
             # --- Initialize and Run Model ---
@@ -612,13 +620,17 @@ with open(output_file_path, "w") as output_file:
                 agent_instances[profile_name][interest_rate] = model.schedule.agents[0]
 
                 end_time_sim = time.time()
-                print(f"Simulation for R={interest_rate:.2f} completed in {end_time_sim - start_time_sim:.2f} seconds.")
-                print(f"Final Wealth: {agent_data['Wealth'].iloc[-1]:.2f}")
+                print(f"Simulation for Profile '{profile_name}' at R={interest_rate:.2f} completed in {end_time_sim - start_time_sim:.4f} seconds.", flush=True) 
+                if agent_data is not None and not agent_data.empty and 'Wealth' in agent_data.columns:
+                     print(f"  Final Wealth: {agent_data['Wealth'].iloc[-1]:.2f}", flush=True)
+                else:
+                     print(f"  Final Wealth: N/A (Simulation Error or No Data)", flush=True)
+
 
             except Exception as e:
-                 print(f"\n!!!!!! ERROR during simulation for Profile: {profile_name}, R={interest_rate} !!!!!!")
-                 print(f"Error type: {type(e).__name__}")
-                 print(f"Error message: {e}")
+                 print(f"\n!!!!!! ERROR during simulation for Profile: {profile_name}, R={interest_rate} !!!!!!", flush=True)
+                 print(f"Error type: {type(e).__name__}", flush=True)
+                 print(f"Error message: {e}", flush=True)
                  import traceback
                  print("Traceback:")
                  traceback.print_exc(file=output_file) # Print traceback to the log file
@@ -629,7 +641,7 @@ with open(output_file_path, "w") as output_file:
 
 
     print("\n" + "="*70)
-    print("All Simulation Runs Completed")
+    print("All Simulation Runs Completed", flush=True)
     print("="*70 + "\n")
 
 
@@ -658,7 +670,7 @@ with open(output_file_path, "w") as output_file:
                 plt.xlabel("Wealth (k)")
                 plt.ylabel("Value V(k)")
                 plt.grid(True, linestyle=':', alpha=0.6)
-                plt.ticklabel_format(style='sci', axis='x', scilimits=(0,0)) # Use sci notation if numbers large
+                plt.ticklabel_format(style='sci', axis='x', scilimits=(0,0)) # Use sci notation if numbers are large
 
                 # Plot Policy Function
                 plt.subplot(1, 2, 2)
@@ -698,13 +710,13 @@ with open(output_file_path, "w") as output_file:
     # Loop through each interest rate to create a combined plot
     for interest_rate in interest_rates_to_simulate:
         print(f"  Generating combined plot for R = {interest_rate:.2f}")
-        # ***** CHANGE: Update layout to 3 rows, 2 columns *****
+        # *****Update layout to 3 rows, 2 columns *****
         fig, axes = plt.subplots(3, 2, figsize=(14, 18)) # Adjust figsize if needed
         fig.suptitle(f"Simulation Time Series Results (R = {interest_rate:.2f})", fontsize=16)
         axes = axes.flatten() # Flatten axes array for easier indexing (now 6 axes: 0-5)
 
         plot_successful = False # Flag to check if any data was plotted for this rate
-        # ***** CHANGE: Track plotted profiles for 6 subplots *****
+        # *****Track plotted profiles for 6 subplots *****
         plotted_profiles_on_subplot = [set() for _ in range(6)]
 
         # --- Data storage for the bar chart for this interest rate ---
@@ -812,12 +824,12 @@ with open(output_file_path, "w") as output_file:
 
                 except Exception as e:
                     # Error during Y-data conversion or plotting for this profile
-                    print(f"    ERROR during Y-data conversion or plotting for {profile_name}, R={interest_rate}: {e}")
+                    print(f"    ERROR during Y-data conversion or plotting for {profile_name}, R={interest_rate}: {e}", flush=True)
                     # Print problematic Y-data
-                    if 'Previous_Wealth' in agent_data.columns: print(f"    Problematic Previous_Wealth ({type(agent_data['Previous_Wealth'])}): {agent_data['Previous_Wealth'].tolist()}")
-                    if 'Savings' in agent_data.columns: print(f"    Problematic Savings ({type(agent_data['Savings'])}): {agent_data['Savings'].tolist()}")
-                    if 'Consumption' in agent_data.columns: print(f"    Problematic Consumption ({type(agent_data['Consumption'])}): {agent_data['Consumption'].tolist()}")
-                    if 'Utility' in agent_data.columns: print(f"    Problematic Utility ({type(agent_data['Utility'])}): {agent_data['Utility'].tolist()}")
+                    if 'Previous_Wealth' in agent_data.columns: print(f"    Problematic Previous_Wealth ({type(agent_data['Previous_Wealth'])}): {agent_data['Previous_Wealth'].tolist()}", flush=True)
+                    if 'Savings' in agent_data.columns: print(f"    Problematic Savings ({type(agent_data['Savings'])}): {agent_data['Savings'].tolist()}", flush=True)
+                    if 'Consumption' in agent_data.columns: print(f"    Problematic Consumption ({type(agent_data['Consumption'])}): {agent_data['Consumption'].tolist()}", flush=True)
+                    if 'Utility' in agent_data.columns: print(f"    Problematic Utility ({type(agent_data['Utility'])}): {agent_data['Utility'].tolist()}", flush=True)
                     # Continue to the next profile
                     continue
 
@@ -828,7 +840,6 @@ with open(output_file_path, "w") as output_file:
         # --- Finalize and Save TIME SERIES Figure for this interest rate ---
         if plot_successful:
             # Add legends to each subplot where at least one profile was plotted
-            # ***** CHANGE: Loop through 6 potential subplots *****
             for i in range(len(axes)): # Iterate through all axes
                  if plotted_profiles_on_subplot[i]: # Check if any profile was successfully plotted on this subplot
                      axes[i].legend(fontsize='x-small', loc='best') # Adjust legend props if needed
@@ -847,8 +858,6 @@ with open(output_file_path, "w") as output_file:
             print(f"  Skipping combined time series plot for R={interest_rate:.2f} (no successful simulations found or plotted).")
             plt.close(fig) # Close the empty figure
 
-
-        # ***** NEW: Generate and Save BAR CHART for this interest rate *****
         if summed_savings_for_bar: # Check if we collected any data for the bar chart
             print(f"  Generating total savings bar chart for R = {interest_rate:.2f}")
             plt.figure(figsize=(10, 6)) # New figure for the bar chart
@@ -881,7 +890,7 @@ with open(output_file_path, "w") as output_file:
 
 
     print("\n" + "="*70)
-    print("Plot Generation Complete")
+    print("Plot Generation Complete", flush=True)
     print("="*70)
 
 # --- Restore Standard Output ---
