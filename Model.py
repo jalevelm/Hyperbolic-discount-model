@@ -521,14 +521,24 @@ class SavingModel(Model):
             # distribution summing to 1), assign wealth from the last range.
             init_wealth = random.randint(max(1, self.wealth_dist[-1][1][0]), self.wealth_dist[-1][1][1])
 
-        # --- Create and Add the Agent ---
-        # Create a SavingAgent instance with the specified parameters.
-        # Note: The wealth grid is now available as self.wealth_grid.
-        agent = SavingAgent(0, self, profile["beta"], profile["delta"], init_wealth, self.sigma, self.borrowing_limit)
-        self.schedule.add(agent)  # Add the agent to the scheduler
-        self.grid.place_agent(agent, (0, 0))  # Place agent on grid (position irrelevant)
-        print(f"Agent created and added to schedule. Initial wealth: {init_wealth}", flush=True)
-       
+        agent_vfi_iterations = profile.get("vfi_iterations", 50)
+        print(f"  Passing vfi_iterations={agent_vfi_iterations} to SavingAgent constructor.", flush=True) # Add this print for debugging
+
+    # --- Create and Add the Agent, passing the agent_vfi_iterations ---
+        agent = SavingAgent(self.next_id(), # Or your agent ID generation, e.g., 0 if only one agent
+                        self,
+                        profile["beta"],
+                        profile["delta"],
+                        init_wealth,
+                        self.sigma, # Assuming sigma is a model attribute or passed correctly
+                        self.borrowing_limit,
+                        iterations=agent_vfi_iterations) # <-- MAKE SURE THIS IS PASSED
+
+        self.schedule.add(agent)
+        # Assuming grid placement is still relevant, even if minimal
+        # self.grid.place_agent(agent, (0,0)) # Or however you handle agent placement
+        print(f"Agent created with ID {agent.unique_id} and added to schedule. Initial wealth: {init_wealth}", flush=True)
+        
 
 
     def step(self):
@@ -549,11 +559,11 @@ class SavingModel(Model):
 
 # --- Define Agent Profiles ---
 agent_profiles = {
-    "planner": {"beta": 0.8, "delta": 0.98,"vfi_iterations": 50},  # Higher beta = less present bias, higer delta = more patient
-    "moderate": {"beta": 0.7, "delta": 0.96, "vfi_iterations": 50},  # Base values
-    "procrastinator": {"beta": 0.6, "delta": 0.98, "vfi_iterations": 50},  # low beta = more present bias, high delta = more patient, values also future consumption
-    "inverse procrastinator": {"beta": 0.8, "delta": 0.85, "vfi_iterations": 50},
-    "impulsive": {"beta": 0.6, "delta": 0.85, "vfi_iterations": 50},  # lower beta = more present bias, lower delta = less patient
+    "planner": {"beta": 0.8, "delta": 0.98,"vfi_iterations": 60},  # Higher beta = less present bias, higer delta = more patient
+    "moderate": {"beta": 0.7, "delta": 0.96, "vfi_iterations": 60},  # Base values
+    "procrastinator": {"beta": 0.6, "delta": 0.98, "vfi_iterations": 60},  # low beta = more present bias, high delta = more patient, values also future consumption
+    "inverse procrastinator": {"beta": 0.8, "delta": 0.85, "vfi_iterations": 60},
+    "impulsive": {"beta": 0.6, "delta": 0.85, "vfi_iterations": 60},  # lower beta = more present bias, lower delta = less patient
 }
 
 sigma = 0.4387 # elasticity of satisfaction
@@ -603,7 +613,7 @@ with open(output_file_path, "w") as output_file:
 # --- Parameters for the SLOW SCENARIO you want to profile ---
 PROFILE_TO_DEBUG = "planner" 
 INTEREST_RATE_TO_DEBUG = 1.10 
-NUM_WEALTH_POINTS_DEBUG = 100 #wealth_grid size for profiling
+NUM_WEALTH_POINTS_DEBUG = 120 #wealth_grid size for profiling
 # The VFI iterations are set inside SavingAgent.step()
 
 SIMULATION_STEPS_FOR_PROFILING_VFI = 1 # VFI happens in the agent's first step, so 1 is enough.
