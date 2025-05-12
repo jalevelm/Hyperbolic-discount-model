@@ -11,6 +11,8 @@ import matplotlib.pyplot as plt
 import scipy.optimize as optimize  
 from joblib import Parallel, delayed
 import pandas as pd
+import cProfile
+import pstats
 
 class SavingAgent(Agent):
     """
@@ -53,7 +55,7 @@ class SavingAgent(Agent):
             wealth level (savings) for each possible current wealth level.
             Initialized to None, calculated during the first step.
     """
-    def __init__(self, unique_id, model, beta, delta, init_wealth, sigma, borrowing_limit):
+    def __init__(self, unique_id, model, beta, delta, init_wealth, sigma, borrowing_limit, iterations=50):
         """
         Initializes a new SavingAgent.
 
@@ -80,6 +82,7 @@ class SavingAgent(Agent):
         self.savings = 0        # Initial savings (updated each step)
         self.previous_savings = None    # Savings from the previous step
         self.previous_wealth = init_wealth  # Wealth at the start of the step
+        self.max_vfi_iterations = iterations
         
         # --- Derived Parameters ---
         self.R_star = 1 + (1 - self.delta) / (self.beta * self.delta)   # Threshold interest rate
@@ -122,7 +125,6 @@ class SavingAgent(Agent):
             g = np.zeros_like(wealth_grid)
 
             # --- Value Iteration Algorithm ---
-            iterations = 50  # Maximum number of iterations
             tolerance = 1e-6  # Convergence tolerance
             iteration_count = 0   # Iteration counter
 
@@ -131,13 +133,13 @@ class SavingAgent(Agent):
 
             outer_loop_start_time = time.time()
 
-            print(f"Agent {self.unique_id}: Starting value iteration with wealth_grid size {len(wealth_grid)} and max_iters {iterations}", flush=True)
+            print(f"Agent {self.unique_id}: Starting value iteration with wealth_grid size {len(wealth_grid)} and max_iters {self.max_vfi_iterations}", flush=True)
 
-            for _ in range(iterations):
+            for _ in range(self.max_vfi_iterations):
                 iteration_count += 1 
                 V_old = V.copy()    # Store the previous iteration's value function
                 if iteration_count % 10 == 0: # Print progress every 10 VFI iterations
-                    print(f"Agent {self.unique_id}: VFI Iteration {iteration_count}/{iterations}", flush=True)
+                    print(f"Agent {self.unique_id}: VFI Iteration {iteration_count}/{self.max_vfi_iterations}", flush=True)
 
                 inner_loop_start_time = time.time()
 
@@ -148,7 +150,7 @@ class SavingAgent(Agent):
 
                     # Find the optimal savings and continuation value using the
                     # current value function (V) and the agent's parameters.
-                    continuation_value, next_k, _ = self.optimize_savings(k_val, V, wealth_grid)
+                    continuation_value, next_k, _ = self.optimize_savings(k_val, V, wealth_grid) # NOTE: V here is the V being updated, not V_old
 
                     # Calculate consumption based on the budget constraint
                     consumption = self.model.interest_rate * k_val - next_k
@@ -419,7 +421,7 @@ class SavingModel(Model):
             model and agent-level data during the simulation.
     """
     
-    def __init__(self, agent_profile, interest_rate, sigma, wealth_dist):
+    def __init__(self, agent_profile, interest_rate, sigma, wealth_dist, num_wealth_points=100):
         """
         Initializes the SavingModel.
 
@@ -430,6 +432,7 @@ class SavingModel(Model):
             interest_rate (float): The constant gross interest rate.
             sigma (float): The coefficient of relative risk aversion.
             wealth_dist (list): The distribution of initial wealth.
+            num_wealth_points (int): Number of points in the wealth grid.
         """
 
         super().__init__()  # Initialize the Model superclass
@@ -441,6 +444,7 @@ class SavingModel(Model):
         self.max_wealth = 10000000  # Upper bound for the wealth grid
         self.borrowing_limit = 0    # Lower bound for wealth (no borrowing)
         self.wealth_dist = wealth_dist  # Initial wealth distribution
+        self.num_wealth_points = num_wealth_points
 
         # --- Mesa Components ---
         # Grid is not strictly necessary for a single agent but is kept for
@@ -450,7 +454,8 @@ class SavingModel(Model):
 
         # --- Create the Wealth Grid ---
         # A discrete set of wealth levels used for value function iteration.
-        self.wealth_grid = np.linspace(1e-6, self.max_wealth, 100) 
+        self.wealth_grid = np.linspace(1e-6, self.max_wealth, self.num_wealth_points)
+        print(f"Model Initialized with a wealth_grid of {self.num_wealth_points} points.", flush=True)
 
 
         # --- Create the Agent ---
@@ -541,13 +546,14 @@ class SavingModel(Model):
 
 # ---------------------------------------------------------- Model run block ------------------------------------------------------------------------
 
+
 # --- Define Agent Profiles ---
 agent_profiles = {
-    "planner": {"beta": 0.8, "delta": 0.98},  # Higher beta = less present bias, higer delta = more patient
-    "moderate": {"beta": 0.7, "delta": 0.96},  # Base values
-    "procrastinator": {"beta": 0.6, "delta": 0.98},  # low beta = more present bias, high delta = more patient, values also future consumption
-    "inverse procrastinator": {"beta": 0.8, "delta": 0.85},
-    "impulsive": {"beta": 0.6, "delta": 0.85},  # lower beta = more present bias, lower delta = less patient
+    "planner": {"beta": 0.8, "delta": 0.98,"vfi_iterations": 50},  # Higher beta = less present bias, higer delta = more patient
+    "moderate": {"beta": 0.7, "delta": 0.96, "vfi_iterations": 50},  # Base values
+    "procrastinator": {"beta": 0.6, "delta": 0.98, "vfi_iterations": 50},  # low beta = more present bias, high delta = more patient, values also future consumption
+    "inverse procrastinator": {"beta": 0.8, "delta": 0.85, "vfi_iterations": 50},
+    "impulsive": {"beta": 0.6, "delta": 0.85, "vfi_iterations": 50},  # lower beta = more present bias, lower delta = less patient
 }
 
 sigma = 0.4387 # elasticity of satisfaction
@@ -559,6 +565,7 @@ wealth_dist = [
     (0.0045, (1000000, 10000000))  # More than 1,000,000 USD 
 ]
 
+'''
 # --- Define Interest Rates to Simulate ---
 interest_rates_to_simulate = [1.01, 1.10, 1.20, 1.30] # interest rates (Gross Rate R)
 
@@ -591,8 +598,110 @@ with open(output_file_path, "w") as output_file:
     print("="*70)
     print("Starting Simulation Runs", flush=True)
     print("="*70)
+'''
+#---------------------------------------------------------PROFILING BLOCK----------------------------------------------------------------------------------
+# --- Parameters for the SLOW SCENARIO you want to profile ---
+PROFILE_TO_DEBUG = "planner" 
+INTEREST_RATE_TO_DEBUG = 1.10 
+NUM_WEALTH_POINTS_DEBUG = 100 #wealth_grid size for profiling
+# The VFI iterations are set inside SavingAgent.step()
 
+SIMULATION_STEPS_FOR_PROFILING_VFI = 1 # VFI happens in the agent's first step, so 1 is enough.
+
+# --- Setup Output Directories (same as before) ---
+output_dir_text = "output_text"
+os.makedirs(output_dir_text, exist_ok=True)
+# output_dir_plots is not strictly needed for profiling VFI but doesn't hurt
+output_dir_plots = "output_plots"
+os.makedirs(output_dir_plots, exist_ok=True)
+# Use a distinct log file for profiling output
+output_file_path = os.path.join(output_dir_text, "simulation_output_PROFILING.txt")
+
+# --- Redirect Output to File  ---
+print(f"Redirecting simulation stdout log to: {output_file_path}")
+with open(output_file_path, "w") as output_file:
+    original_stdout = sys.stdout
+    sys.stdout = output_file # Redirect standard output
+
+    # --- START OF PROFILING LOGIC ---
+    print("="*70, flush=True)
+    print(f"Starting PROFILING Run for VFI", flush=True)
+    print(f"Target Profile: {PROFILE_TO_DEBUG}, Target Interest Rate: {INTEREST_RATE_TO_DEBUG}", flush=True)
+    print(f"Wealth Grid Points: {NUM_WEALTH_POINTS_DEBUG}", flush=True)
+    #print(f"Agent VFI Iterations: (Ensure agent uses your high value, e.g., 5000)", flush=True)
+    print(f"Simulation Steps for this run: {SIMULATION_STEPS_FOR_PROFILING_VFI}", flush=True)
+    print("="*70, flush=True)
+
+    profiler = cProfile.Profile() # Create a profiler object
+
+    if PROFILE_TO_DEBUG not in agent_profiles:
+        print(f"ERROR: Profile '{PROFILE_TO_DEBUG}' not found in agent_profiles.", flush=True)
+        sys.exit()
+    profile_config = agent_profiles[PROFILE_TO_DEBUG]
+
+    # Retrieve expected iterations for printing
+    expected_vfi_iterations = profile_config.get("vfi_iterations", "DEFAULT(50)")
+    print(f"Expecting Agent VFI Iterations: {expected_vfi_iterations}", flush=True)
+
+    start_time_sim = time.time()
+    print(f"--- Profiling for Profile: {PROFILE_TO_DEBUG}, Interest Rate (R): {INTEREST_RATE_TO_DEBUG:.2f} ---", flush=True)
+
+    model = None # Initialize model to None
+    try:
+        # Enable profiler
+        profiler.enable()
+
+        # Initialize model
+        model = SavingModel(profile_config, # Contains beta, delta, vfi_iterations
+                            INTEREST_RATE_TO_DEBUG,
+                            sigma,
+                            wealth_dist,
+                            num_wealth_points=NUM_WEALTH_POINTS_DEBUG)
+
+        # Run the simulation step
+        for i in range(SIMULATION_STEPS_FOR_PROFILING_VFI):
+            model.step()
+
+    except Exception as e:
+        # Handle exceptions during the profiled section
+        print(f"\n!!!!!! ERROR during PROFILING run !!!!!!", flush=True)
+        print(f"Error type: {type(e).__name__}", flush=True)
+        print(f"Error message: {e}", flush=True)
+        import traceback
+        output_file.write("\nTraceback:\n")
+        traceback.print_exc(file=output_file)
+        print("!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!", flush=True)
+    finally:
+        # --- FIX: Use finally block to ensure disable is called ---
+        if 'profiler' in locals(): # Check if profiler was created
+            profiler.disable() # Safe to call disable even if not enabled or already disabled
+            print("Profiler disabled.", flush=True)
+
+            end_time_sim = time.time()
+            print(f"Simulation (including VFI) for profiling completed/stopped in {end_time_sim - start_time_sim:.4f} seconds.", flush=True)
+
+            # --- Print Profiling Stats ---
+            if model: # Only print stats if model was successfully created and run started
+                output_file.write(f"\n\n----- CPROFILE STATS FOR VFI -----\n")
+                output_file.write(f"Profile: {PROFILE_TO_DEBUG}, R={INTEREST_RATE_TO_DEBUG:.2f}, GridPoints: {NUM_WEALTH_POINTS_DEBUG}\n")
+                stats = pstats.Stats(profiler, stream=output_file).sort_stats('cumulative')
+                stats.print_stats(50)
+                output_file.write(f"----- END CPROFILE STATS -----\n\n")
+                print("Profiling stats written to log file.", flush=True)
+            else:
+                print("Profiling stats not generated due to error before/during model run.", flush=True)
+        # --- End of FIX ---
+
+    print("\n" + "="*70, flush=True)
+    print("PROFILING Run Completed.", flush=True)
+    print("="*70 + "\n", flush=True)
+    # --- END OF PROFILING LOGIC ---
+# --- Restore Standard Output ---
+sys.stdout = original_stdout
+print(f"\nSimulation stdout log (with profiling data) saved to: {output_file_path}")
+'''
     # Loop through agent profiles first
+    
     for profile_name, profile in agent_profiles.items():
         print(f"\n===== Running Simulations for Profile: {profile_name} =====", flush=True)
         print(f"Profile parameters: Beta={profile['beta']}, Delta={profile['delta']}", flush=True)
@@ -897,3 +1006,4 @@ with open(output_file_path, "w") as output_file:
 sys.stdout = original_stdout # Reset stdout to console
 print(f"\nSimulation stdout log saved to: {output_file_path}")
 print(f"Plots saved to directory: {output_dir_plots}")
+'''
