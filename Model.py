@@ -95,6 +95,11 @@ class SavingAgent(Agent):
         # --- Internal Tracking ---
         self.step_count = 0     # Number of steps taken
 
+        self.V_snapshots = {}
+        self.g_snapshots = {}
+        self.diff_V_history = [] 
+        self.diff_g_history = [] 
+
     def step(self):
         """
         Advances the agent by one time step. This encompasses:
@@ -123,6 +128,9 @@ class SavingAgent(Agent):
             # Initialize value and policy functions as NumPy arrays
             V = np.zeros_like(wealth_grid)
             g = np.zeros_like(wealth_grid)
+         
+            iterations_to_snapshot = [1, 39, 40, 41, 50, 51, 100, 150, 200]
+    
 
             # --- Value Iteration Algorithm ---
             tolerance = 1e-6  # Convergence tolerance
@@ -138,19 +146,19 @@ class SavingAgent(Agent):
             for _ in range(self.max_vfi_iterations):
                 iteration_count += 1 
                 V_old = V.copy()    # Store the previous iteration's value function
-                if iteration_count % 10 == 0: # Print progress every 10 VFI iterations
-                    print(f"Agent {self.unique_id}: VFI Iteration {iteration_count}/{self.max_vfi_iterations}", flush=True)
+                g_old_this_iter = g.copy()
 
                 inner_loop_start_time = time.time()
 
                 # Iterate over all possible wealth levels in the grid
                 for i, k_val in enumerate(wealth_grid):
-                    if i % (len(wealth_grid) // 10) == 0 and iteration_count <=1 : # Print for a few grid points in the first VFI iteration
-                        print(f"Agent {self.unique_id}: VFI Iter {iteration_count}, Processing wealth_grid index {i}/{len(wealth_grid)}", flush=True)
 
+                    if i % (len(wealth_grid) // 10) == 0 and iteration_count == 1 : # Ensure it's iteration_count == 1
+                        print(f"Agent {self.unique_id}: VFI Iter {iteration_count}, Processing wealth_grid index {i}/{len(wealth_grid)}", flush=True)
+        
                     # Find the optimal savings and continuation value using the
                     # current value function (V) and the agent's parameters.
-                    continuation_value, next_k, _ = self.optimize_savings(k_val, V, wealth_grid) # NOTE: V here is the V being updated, not V_old
+                    continuation_value, next_k, _ = self.optimize_savings(k_val, V_old, wealth_grid) # NOTE: V here is the V being updated, not V_old
 
                     # Calculate consumption based on the budget constraint
                     consumption = self.model.interest_rate * k_val - next_k
@@ -163,9 +171,20 @@ class SavingAgent(Agent):
                 inner_loop_end_time = time.time()
                 total_inner_loop_time += (inner_loop_end_time - inner_loop_start_time)
 
+
+                # --- Store snapshots if it's a target iteration ---
+                if iteration_count in iterations_to_snapshot:
+                    self.V_snapshots[iteration_count] = V.copy()
+                    self.g_snapshots[iteration_count] = g.copy()
+
                 # --- Convergence Check ---
 
-                diff = np.max(np.abs(V - V_old))
+                diff_V = np.max(np.abs(V - V_old)) # Change in V compared to start of this iteration
+                diff_g = np.max(np.abs(g - g_old_this_iter)) # Change in g compared to start of this iteration
+
+                
+                if iteration_count % 10 == 0: 
+                    print(f"Agent {self.unique_id}: VFI Iteration {iteration_count}/{self.max_vfi_iterations}, Diff_V: {diff_V:.4e}, Diff_g: {diff_g:.4e}", flush=True)
                 
                 if np.any(np.isnan(V)):   # Check for numerical instability
                     print(f"Agent {self.unique_id}: NaN detected in V after iteration {iteration_count}!", flush=True)
@@ -175,7 +194,7 @@ class SavingAgent(Agent):
                     print(f"Agent {self.unique_id}: Value function is likely diverging at iteration {iteration_count}!", flush=True)
                     raise ValueError("Value function is likely diverging")
 
-                if diff < tolerance:   # Check for convergence
+                if diff_V < tolerance:   # Check for convergence
                     print(f"Agent {self.unique_id}: Value function converged after {iteration_count} iterations.", flush=True)
                     break    
             else:
@@ -441,7 +460,7 @@ class SavingModel(Model):
         self.num_agents = 1  #Number of agents
         self.interest_rate = interest_rate  # Constant gross interest rate
         self.sigma = sigma  # inv. of intertemporal substitution
-        self.max_wealth = 10000000  # Upper bound for the wealth grid
+        self.max_wealth = 750000  # Upper bound for the wealth grid
         self.borrowing_limit = 0    # Lower bound for wealth (no borrowing)
         self.wealth_dist = wealth_dist  # Initial wealth distribution
         self.num_wealth_points = num_wealth_points
@@ -559,7 +578,7 @@ class SavingModel(Model):
 
 # --- Define Agent Profiles ---
 agent_profiles = {
-    "planner": {"beta": 0.8, "delta": 0.98,"vfi_iterations": 60},  # Higher beta = less present bias, higer delta = more patient
+    "planner": {"beta": 0.8, "delta": 0.90,"vfi_iterations": 350},  # Higher beta = less present bias, higer delta = more patient ° default = "beta": 0.8, "delta": 0.98,"vfi_iterations": 60
     "moderate": {"beta": 0.7, "delta": 0.96, "vfi_iterations": 60},  # Base values
     "procrastinator": {"beta": 0.6, "delta": 0.98, "vfi_iterations": 60},  # low beta = more present bias, high delta = more patient, values also future consumption
     "inverse procrastinator": {"beta": 0.8, "delta": 0.85, "vfi_iterations": 60},
@@ -612,8 +631,8 @@ with open(output_file_path, "w") as output_file:
 #---------------------------------------------------------PROFILING BLOCK----------------------------------------------------------------------------------
 # --- Parameters for the SLOW SCENARIO you want to profile ---
 PROFILE_TO_DEBUG = "planner" 
-INTEREST_RATE_TO_DEBUG = 1.10 
-NUM_WEALTH_POINTS_DEBUG = 120 #wealth_grid size for profiling
+INTEREST_RATE_TO_DEBUG = 1.05
+NUM_WEALTH_POINTS_DEBUG = 200 #wealth_grid size for profiling
 # The VFI iterations are set inside SavingAgent.step()
 
 SIMULATION_STEPS_FOR_PROFILING_VFI = 1 # VFI happens in the agent's first step, so 1 is enough.
@@ -682,7 +701,7 @@ with open(output_file_path, "w") as output_file:
         traceback.print_exc(file=output_file)
         print("!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!", flush=True)
     finally:
-        # --- FIX: Use finally block to ensure disable is called ---
+        
         if 'profiler' in locals(): # Check if profiler was created
             profiler.disable() # Safe to call disable even if not enabled or already disabled
             print("Profiler disabled.", flush=True)
@@ -700,12 +719,59 @@ with open(output_file_path, "w") as output_file:
                 print("Profiling stats written to log file.", flush=True)
             else:
                 print("Profiling stats not generated due to error before/during model run.", flush=True)
-        # --- End of FIX ---
+
+            if model and hasattr(model.schedule.agents[0], 'V_snapshots'):
+                print("Generating V and g snapshot plots...", flush=True)
+                agent_for_plots = model.schedule.agents[0]
+                wealth_grid_for_plots = model.wealth_grid
+                
+                num_snapshots = len(agent_for_plots.V_snapshots)
+                if num_snapshots > 0:
+                    # Plot V snapshots
+                    plt.figure(figsize=(12, 6))
+                    for iter_num, v_snap in agent_for_plots.V_snapshots.items():
+                        plt.plot(wealth_grid_for_plots, v_snap, label=f'V iter {iter_num}')
+                    plt.title(f'Value Function (V) Snapshots\nProfile: {PROFILE_TO_DEBUG}, R={INTEREST_RATE_TO_DEBUG:.2f}, Delta={agent_for_plots.delta}, Grid={len(wealth_grid_for_plots)}')
+                    plt.xlabel('Wealth (k)')
+                    plt.ylabel('Value V(k)')
+                    plt.legend()
+                    plt.grid(True)
+                    plot_filename_v_snap = os.path.join(output_dir_plots, f"V_snapshots_{PROFILE_TO_DEBUG}_R{INTEREST_RATE_TO_DEBUG:.2f}.png")
+                    try:
+                        plt.savefig(plot_filename_v_snap)
+                        print(f"Saved V snapshots plot: {plot_filename_v_snap}", flush=True)
+                    except Exception as e_plot:
+                        print(f"Error saving V snapshots plot: {e_plot}", flush=True)
+                    plt.close()
+
+                    # Plot g snapshots
+                    plt.figure(figsize=(12, 6))
+                    for iter_num, g_snap in agent_for_plots.g_snapshots.items():
+                        plt.plot(wealth_grid_for_plots, g_snap, label=f'g iter {iter_num} (Savings k\')')
+                    plt.plot(wealth_grid_for_plots, wealth_grid_for_plots, 'k--', label='k\' = k (45-deg line)', alpha=0.7) # 45-degree line
+                    plt.title(f'Policy Function (g) Snapshots\nProfile: {PROFILE_TO_DEBUG}, R={INTEREST_RATE_TO_DEBUG:.2f}, Delta={agent_for_plots.delta}, Grid={len(wealth_grid_for_plots)}')
+                    plt.xlabel('Current Wealth (k)')
+                    plt.ylabel('Next Period Wealth (k\') = Savings')
+                    plt.legend()
+                    plt.grid(True)
+                    plot_filename_g_snap = os.path.join(output_dir_plots, f"g_snapshots_{PROFILE_TO_DEBUG}_R{INTEREST_RATE_TO_DEBUG:.2f}.png")
+                    try:
+                        plt.savefig(plot_filename_g_snap)
+                        print(f"Saved g snapshots plot: {plot_filename_g_snap}", flush=True)
+                    except Exception as e_plot:
+                        print(f"Error saving g snapshots plot: {e_plot}", flush=True)
+                    plt.close()
+                else:
+                    print("No snapshots found to plot.", flush=True)
+
+    
+        
 
     print("\n" + "="*70, flush=True)
     print("PROFILING Run Completed.", flush=True)
     print("="*70 + "\n", flush=True)
     # --- END OF PROFILING LOGIC ---
+
 # --- Restore Standard Output ---
 sys.stdout = original_stdout
 print(f"\nSimulation stdout log (with profiling data) saved to: {output_file_path}")
