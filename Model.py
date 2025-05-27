@@ -129,7 +129,7 @@ class SavingAgent(Agent):
             V = np.zeros_like(wealth_grid)
             g = np.zeros_like(wealth_grid)
          
-            iterations_to_snapshot = [1, 39, 40, 41, 50, 51, 100, 150, 200]
+            iterations_to_snapshot = [1, 100, 250, 500, 750, 1000, 1250, 1500]
     
 
             # --- Value Iteration Algorithm ---
@@ -172,34 +172,44 @@ class SavingAgent(Agent):
                 total_inner_loop_time += (inner_loop_end_time - inner_loop_start_time)
 
 
-                # --- Store snapshots if it's a target iteration ---
+               
                 if iteration_count in iterations_to_snapshot:
                     self.V_snapshots[iteration_count] = V.copy()
                     self.g_snapshots[iteration_count] = g.copy()
 
-                # --- Convergence Check ---
 
-                diff_V = np.max(np.abs(V - V_old)) # Change in V compared to start of this iteration
-                diff_g = np.max(np.abs(g - g_old_this_iter)) # Change in g compared to start of this iteration
+                diff_V = np.max(np.abs(V - V_old)) 
+                abs_diff_g_array = np.abs(g - g_old_this_iter)
+                diff_g = np.max(abs_diff_g_array)
+                if diff_g > 0: # Avoid error if diff_g is zero (no single max index then)
+                    idx_max_diff_g = np.argmax(abs_diff_g_array)
+                    k_val_max_diff_g = wealth_grid[idx_max_diff_g]
+                else:
+                    k_val_max_diff_g = np.nan # Or some other placeholder if diff_g is 0
+
 
                 
-                if iteration_count % 10 == 0: 
-                    print(f"Agent {self.unique_id}: VFI Iteration {iteration_count}/{self.max_vfi_iterations}, Diff_V: {diff_V:.4e}, Diff_g: {diff_g:.4e}", flush=True)
+                if iteration_count % 50 == 0: 
+                    print(f"Agent {self.unique_id}: VFI Iteration {iteration_count}/{self.max_vfi_iterations}, Diff_V: {diff_V:.4e}, Diff_g: {diff_g:.4e} (at k={k_val_max_diff_g:.2f})", flush=True)
                 
-                if np.any(np.isnan(V)):   # Check for numerical instability
-                    print(f"Agent {self.unique_id}: NaN detected in V after iteration {iteration_count}!", flush=True)
+                # --- Convergence and other checks ---
+                if np.any(np.isnan(V)) or np.any(np.isinf(V)):
+                    print(f"Agent {self.unique_id}: NaN/Inf detected in V after iteration {iteration_count}! Diff_V: {diff_V:.4e}, Diff_g: {diff_g:.4e} (at k={k_val_max_diff_g:.2f})", flush=True)
                     break
 
                 if np.any(np.abs(V) > 1e6): # Check for divergence
-                    print(f"Agent {self.unique_id}: Value function is likely diverging at iteration {iteration_count}!", flush=True)
+                    print(f"Agent {self.unique_id}: Value function is likely diverging at iteration {iteration_count}! Diff_V: {diff_V:.4e}, Diff_g: {diff_g:.4e} (at k={k_val_max_diff_g:.2f})", flush=True)
                     raise ValueError("Value function is likely diverging")
 
-                if diff_V < tolerance:   # Check for convergence
-                    print(f"Agent {self.unique_id}: Value function converged after {iteration_count} iterations.", flush=True)
+
+                if diff_V < tolerance:   # Check for convergence based on Value Function
+                    print(f"Agent {self.unique_id}: Value function converged after {iteration_count} iterations. Diff_V: {diff_V:.4e}, Diff_g: {diff_g:.4e} (at k={k_val_max_diff_g:.2f})", flush=True)
                     break    
-            else:
-                # Executed if the loop completes without breaking (no convergence)
-                print(f"Agent {self.unique_id}: Value function DID NOT converge after {iteration_count} iterations.", flush=True)
+            else: # Loop finished without break (no convergence)
+                # Also ensure k_val_max_diff_g is defined here if the loop runs to completion
+                if 'k_val_max_diff_g' not in locals(): # Handle case if loop was very short
+                    k_val_max_diff_g = np.nan
+                print(f"Agent {self.unique_id}: Value function DID NOT converge after {iteration_count} iterations. Final Diff_V: {diff_V:.4e}, Diff_g: {diff_g:.4e} (at k={k_val_max_diff_g:.2f})", flush=True)
 
             outer_loop_end_time = time.time()
             total_value_iteration_time = outer_loop_end_time - outer_loop_start_time
@@ -226,26 +236,13 @@ class SavingAgent(Agent):
          # Clip savings to ensure it's within feasible bounds (borrowing limit and max possible wealth)
         self.savings = np.clip(optimal_savings, self.borrowing_limit, self.model.interest_rate * self.wealth)
 
-        
-        '''
-        # --- R* Check and Savings Adjustment  ---
-        # The following block attempts to enforce the theoretical saving/dissaving
-        # behavior based on the comparison of the interest rate (R) and the
-        # threshold interest rate (R*). 
-        if self.model.interest_rate > self.R_star:
-            # Agent SHOULD be saving
-            self.savings = max(self.savings, self.previous_wealth * (1 + 0.001)) # Force a *very small* increase
-        elif self.model.interest_rate < self.R_star:
-            # Agent SHOULD be dissaving to the borrowing limit
-            self.savings = self.borrowing_limit
-        elif self.model.interest_rate == self.R_star:
-            # Agent SHOULD hold wealth constant
-            self.savings = self.previous_wealth
-        '''
 
         # Calculate consumption based on the budget constraint
+        wealth_with_interest=self.model.interest_rate * self.wealth
         consumption = self.model.interest_rate * self.wealth - self.savings
         consumption = max(consumption, 1e-9)  # Ensure positive consumption
+        percentage_consumed = (consumption / wealth_with_interest) * 100
+        percentage_saved = (self.savings / wealth_with_interest) * 100
 
 
         # --- Debugging Prints (End of Step) ---
@@ -260,7 +257,9 @@ class SavingAgent(Agent):
         self.previous_wealth = self.wealth  # Store current wealth for next step
         self.wealth = self.savings  # Next period's wealth is this period's savings
         self.previous_savings = self.savings    # Store current savings for next step
-        print(f"Agent {self.unique_id}: Step end.  Wealth: {self.wealth:.2f}, Savings: {self.savings:.2f}, Consumption: {consumption:.2f}", flush=True)
+
+        print(f"Agent {self.unique_id}: Step end. | Total resources available: {wealth_with_interest:.2f}, Consumption: {consumption:.2f}, Savings: {self.savings:.2f},  Wealth at the end of step: {self.wealth:.2f} ", flush=True)
+        print(f"Percentage of total resources consumed: {percentage_consumed:.2f}, percentage saved: {percentage_saved:.2f}")
         self.step_count += 1    # Increment the step counter
 
     def utility(self, consumption):
@@ -300,112 +299,98 @@ class SavingAgent(Agent):
             return consumption**(1 - self.sigma) / (1 - self.sigma)
 
     
-    def optimize_savings(self, k, V, wealth_grid):
-        """
-        Optimizes the agent's savings decision for a given level of wealth.
 
-        This function finds the optimal next-period wealth (k_next) that
-        maximizes the agent's present-biased discounted utility, given its
-        current wealth (k), the value function (V), and the wealth grid.
-        This implements the agent's optimality condition.
+    def optimize_savings(self, k, V_old_for_opt, wealth_grid_for_opt): 
+        """
+        Optimizes the agent's savings decision for a given level of wealth
+        by searching over discrete choices for next period's wealth (k_next)
+        from the provided wealth_grid.
+
+        This function finds the optimal next-period wealth (k_next) from the grid
+        that maximizes the agent's present-biased discounted utility, given its
+        current wealth (k) and the value function from the previous iteration (V_old_for_opt).
 
         Args:
             k (float): The agent's current wealth.
-            V (np.ndarray): The value function, representing the maximized
-                discounted lifetime utility attainable from each wealth level.
-            wealth_grid (np.ndarray): The discretized grid of possible wealth
-                levels.
+            V_old_for_opt (np.ndarray): The value function from the PREVIOUS VFI iteration.
+            wealth_grid_for_opt (np.ndarray): The discretized grid of possible wealth levels.
 
         Returns:
             tuple: A tuple containing:
-                - continuation_value (float): The discounted value of being at
-                  the optimal next-period wealth level.
-                - optimal_k_next (float): The optimal next-period wealth (savings).
-                - final_total_utility (float): The total utility achieved with
-                  the optimal savings choice.  (Used primarily for debugging.)
+                - continuation_value (float): The interpolated value V_old_for_opt(optimal_k_next),
+                                             used for the Bellman equation.
+                - optimal_k_next (float): The chosen next-period wealth from the grid.
+                - final_total_utility (float): The maximized utility (u(c*) + beta*delta*V_old_for_opt(k'*))
+                                               achieved with the optimal_k_next.
+                                               (Note: the Bellman uses delta*V_old_for_opt(k'*),
+                                                the objective function for choice uses beta*delta*V_old_for_opt(k'*))
 
-                Returns (0, k, 0) if the optimization fails.
+                Returns (0, k, -np.inf) or similar if no valid option is found.
         """
-        optimization_full_start_time = time.time() #added timer
         beta = self.beta    # Present bias parameter
         delta = self.delta  # Discount factor
         R = self.model.interest_rate   # Gross interest rate
+        
+        lower_bound_k_next = max(self.borrowing_limit, 0) # Min k_next (savings)
+        upper_bound_k_next = R * k # Max k_next (savings can't exceed current resources times interest)
 
-        def objective(k_next):
-            """
-            The objective function to be *minimized*.  Represents the
-            negative of the agent's present-biased utility.
+        max_objective_function_val = -np.inf # We are maximizing utility directly here
+        
+        # Default optimal_k_next: clip current k to feasible bounds.
+        # This ensures consumption is non-negative if k is positive.
+        # If R*k itself is less than lower_bound_k_next, this will choose lower_bound_k_next.
+        optimal_k_next = np.clip(k, lower_bound_k_next, upper_bound_k_next) 
 
-            Args:
-                k_next (float): The next period's wealth (agent's choice variable).
+        # Iterate over all possible k_next choices from the grid
+        for k_next_candidate in wealth_grid_for_opt:
+            # Ensure the candidate for k_next is within feasible saving limits
+            if k_next_candidate < lower_bound_k_next or k_next_candidate > upper_bound_k_next:
+                continue
 
-            Returns:
-                float: The negative of the total utility (current utility +
-                    discounted future utility).
-            """
-            # Calculate consumption based on the budget constraint.
-            consumption = R * k - k_next
-            if consumption <= 1e-6:
-                # If consumption is very small (or negative), return a very
-                # large negative utility (represented by positive infinity).
-                # This effectively penalizes infeasible or extremely low
-                # consumption choices.
-                return np.inf
-
-            # Ensure k_next stays within the bounds of the wealth grid.
-            future_wealth = k_next
-            future_wealth = np.clip(future_wealth, wealth_grid.min(), wealth_grid.max()) # Clip here.
-
-            # Interpolate to find the value of being at future_wealth,
-            # given the value function V.  This approximates V(future_wealth).
-            future_utility = delta * np.interp(future_wealth, wealth_grid, V)
-
-            # Calculate the total utility: current utility from consumption +
-            # present-biased discounted future utility.
-            total_utility = self.utility(consumption) + beta * future_utility
+            consumption = R * k - k_next_candidate
             
-            # Return the *negative* of total utility, because we're using
-            # a minimization routine.
-            return -total_utility
+            if consumption <= 1e-9: # Penalize non-positive consumption
+                current_objective_function_val = -np.inf 
+            else:
+                # Value of V_old_for_opt at k_next_candidate for the objective function
+                # Note: k_next_candidate is already a grid point, but if wealth_grid_for_opt
+                # is not perfectly aligned or if k_next_candidate was somehow not from the grid,
+                # interpolation is safer. Since it *is* from the grid, direct indexing
+                # could be faster if you find the index, but interp is robust.
+                # For future_utility_component, it's beta * (delta * V_old(k_next_candidate))
+                # as this is what the agent maximizes.
+                val_at_k_next_candidate = np.interp(k_next_candidate, wealth_grid_for_opt, V_old_for_opt)
+                future_utility_for_objective = delta * val_at_k_next_candidate
 
-        # Define the lower bound for the optimization.  The agent cannot
-        # save less than the borrowing limit (or zero, if borrowing is not allowed).
-        lower_bound = max(self.borrowing_limit, 0)
+                current_objective_function_val = self.utility(consumption) + beta * future_utility_for_objective
+            
+            if current_objective_function_val > max_objective_function_val:
+                max_objective_function_val = current_objective_function_val
+                optimal_k_next = k_next_candidate
 
-        # Use scipy.optimize.minimize_scalar to find the value of k_next
-        # that minimizes the objective function (maximizes utility).
-        # We use the 'bounded' method to constrain the search within the
-        # feasible range (lower_bound to R*k).
-        result = optimize.minimize_scalar(objective, bounds=(lower_bound, R * k), method='bounded')
+        # If no valid choice was found (e.g., all consumptions were non-positive),
+        # max_objective_function_val might still be -np.inf.
+        # In this case, optimal_k_next might still be its default.
+        # We need to ensure optimal_k_next leads to non-negative consumption for calculating final utility.
+        if max_objective_function_val == -np.inf:
+            # Fallback: save as much as possible up to R*k, or hit borrowing limit, ensuring c>=0
+            optimal_k_next = np.clip(R * k, lower_bound_k_next, upper_bound_k_next) 
+            # Re-calculate max_objective_function_val for this fallback optimal_k_next
+            final_consumption_check = R * k - optimal_k_next
+            final_consumption_check = max(final_consumption_check, 1e-9) # Ensure positive for utility calc
 
-
-        if result.success:
-            # If the optimization was successful:
-            optimal_k_next = result.x   # Extract the optimal k_next.
-
-            # Ensure the optimal value is within grid bounds (should already be,
-            # but this is a safeguard).
-            optimal_k_next = np.clip(optimal_k_next, wealth_grid.min(), wealth_grid.max())
-
-            # Calculate the continuation value (discounted future utility)
-            # at the optimal next-period wealth.
-            continuation_value = np.interp(optimal_k_next, wealth_grid, V)                        #continuation_value = delta * np.interp(optimal_k_next, wealth_grid, V)
-
-            # Calculate consumption based on the optimal savings choice.
-            final_consumption = R * k - optimal_k_next
-
-            # Calculate total utility (for debugging/verification).
-            final_total_utility = self.utility(final_consumption) + beta * continuation_value
-
-            return continuation_value, optimal_k_next, final_total_utility
-        else:
-            # If the optimization failed, print an error message and return
-            # default values.
-            print(f"Agent {self.unique_id}: Optimization FAILED for k={k}", flush=True)
-            print(result)   # Print the optimization result for debugging
-            return 0, k, 0  # Return default values
+            val_at_optimal_k_next_fallback = np.interp(optimal_k_next, wealth_grid_for_opt, V_old_for_opt)
+            future_utility_for_objective_fallback = delta * val_at_optimal_k_next_fallback
+            max_objective_function_val = self.utility(final_consumption_check) + beta * future_utility_for_objective_fallback
 
 
+        # Continuation value for the Bellman equation is V_old_for_opt(optimal_k_next)
+        continuation_value_for_bellman = np.interp(optimal_k_next, wealth_grid_for_opt, V_old_for_opt)
+        
+        # The value returned as "final_total_utility" should be the maximized objective value
+        final_total_utility_debug = max_objective_function_val
+
+        return continuation_value_for_bellman, optimal_k_next, final_total_utility_debug
 
 
 class SavingModel(Model):
@@ -460,10 +445,11 @@ class SavingModel(Model):
         self.num_agents = 1  #Number of agents
         self.interest_rate = interest_rate  # Constant gross interest rate
         self.sigma = sigma  # inv. of intertemporal substitution
-        self.max_wealth = 750000  # Upper bound for the wealth grid
+        self.max_wealth = 1000001  # Upper bound for the wealth grid
         self.borrowing_limit = 0    # Lower bound for wealth (no borrowing)
         self.wealth_dist = wealth_dist  # Initial wealth distribution
         self.num_wealth_points = num_wealth_points
+        min_grid_wealth = 1e-6 
 
         # --- Mesa Components ---
         # Grid is not strictly necessary for a single agent but is kept for
@@ -471,10 +457,14 @@ class SavingModel(Model):
         self.grid = MultiGrid(10, 10, True)  # A 10x10 grid
         self.schedule = RandomActivation(self)  # Random activation scheduler
 
+        if self.max_wealth <= min_grid_wealth:
+            raise ValueError(f"max_wealth ({self.max_wealth}) must be greater than min_grid_wealth ({min_grid_wealth})")
+
         # --- Create the Wealth Grid ---
         # A discrete set of wealth levels used for value function iteration.
-        self.wealth_grid = np.linspace(1e-6, self.max_wealth, self.num_wealth_points)
-        print(f"Model Initialized with a wealth_grid of {self.num_wealth_points} points.", flush=True)
+        self.wealth_grid = np.geomspace(min_grid_wealth, self.max_wealth, self.num_wealth_points)
+        print(f"Model Initialized with a GEOMETRICALLY SPACED wealth_grid of {self.num_wealth_points} points from {self.wealth_grid[0]:.2e} to {self.wealth_grid[-1]:.2e}.", flush=True)
+
 
 
         # --- Create the Agent ---
@@ -578,20 +568,20 @@ class SavingModel(Model):
 
 # --- Define Agent Profiles ---
 agent_profiles = {
-    "planner": {"beta": 0.8, "delta": 0.90,"vfi_iterations": 350},  # Higher beta = less present bias, higer delta = more patient ° default = "beta": 0.8, "delta": 0.98,"vfi_iterations": 60
-    "moderate": {"beta": 0.7, "delta": 0.96, "vfi_iterations": 60},  # Base values
-    "procrastinator": {"beta": 0.6, "delta": 0.98, "vfi_iterations": 60},  # low beta = more present bias, high delta = more patient, values also future consumption
-    "inverse procrastinator": {"beta": 0.8, "delta": 0.85, "vfi_iterations": 60},
-    "impulsive": {"beta": 0.6, "delta": 0.85, "vfi_iterations": 60},  # lower beta = more present bias, lower delta = less patient
+    "planner": {"beta": 0.97, "delta": 0.96,"vfi_iterations": 500},  # Higher beta = less present bias, higer delta = more patient ° default = "beta": 0.8, "delta": 0.98,"vfi_iterations": 60
+    "moderate": {"beta": 0.90, "delta": 0.91, "vfi_iterations": 60},  # Base values
+    "procrastinator": {"beta": 0.73, "delta": 0.95, "vfi_iterations": 60},  # low beta = more present bias, high delta = more patient, values also future consumption
+    "inverse procrastinator": {"beta": 0.96, "delta": 0.85, "vfi_iterations": 60},
+    "impulsive": {"beta": 0.60, "delta": 0.80, "vfi_iterations": 60},  # lower beta = more present bias, lower delta = less patient
 }
 
-sigma = 0.4387 # elasticity of satisfaction
+sigma = 0.4387 # inverse of IES
 
 wealth_dist = [
     (0.4152, (0, 9999)),  # Less than 10,000 USD
     (0.4772, (10000, 99999)),  # Between 10,000 and 100,000 USD
     (0.1031, (100000, 999999)),  # Between 100,000 and 1,000,000 USD
-    (0.0045, (1000000, 10000000))  # More than 1,000,000 USD 
+    (0.0045, (1000000, 1000001))  # More than 1,000,000 USD 
 ]
 
 '''
@@ -631,8 +621,8 @@ with open(output_file_path, "w") as output_file:
 #---------------------------------------------------------PROFILING BLOCK----------------------------------------------------------------------------------
 # --- Parameters for the SLOW SCENARIO you want to profile ---
 PROFILE_TO_DEBUG = "planner" 
-INTEREST_RATE_TO_DEBUG = 1.05
-NUM_WEALTH_POINTS_DEBUG = 200 #wealth_grid size for profiling
+INTEREST_RATE_TO_DEBUG = 1.02
+NUM_WEALTH_POINTS_DEBUG = 150 #wealth_grid size for profiling
 # The VFI iterations are set inside SavingAgent.step()
 
 SIMULATION_STEPS_FOR_PROFILING_VFI = 1 # VFI happens in the agent's first step, so 1 is enough.
