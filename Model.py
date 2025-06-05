@@ -99,6 +99,9 @@ class SavingAgent(Agent):
         self.g_snapshots = {}
         self.diff_V_history = [] 
         self.diff_g_history = [] 
+        self.consumption_history = []
+        self.wealth_history = [self.init_wealth] # Start with initial wealth for time step 0
+        self.utility_history = []
 
     def step(self):
         """
@@ -129,7 +132,7 @@ class SavingAgent(Agent):
             V = np.zeros_like(wealth_grid)
             g = np.zeros_like(wealth_grid)
          
-            iterations_to_snapshot = [1, 100, 250, 500, 750, 1000, 1250, 1500]
+            iterations_to_snapshot = [1, 50 ,100, 150, 200, 250, 300, 350, 400, 450, 500, 600, 700, 750, 1000, 1250, 1500]
     
 
             # --- Value Iteration Algorithm ---
@@ -189,7 +192,7 @@ class SavingAgent(Agent):
 
 
                 
-                if iteration_count % 50 == 0: 
+                if iteration_count % 20 == 0: 
                     print(f"Agent {self.unique_id}: VFI Iteration {iteration_count}/{self.max_vfi_iterations}, Diff_V: {diff_V:.4e}, Diff_g: {diff_g:.4e} (at k={k_val_max_diff_g:.2f})", flush=True)
                 
                 # --- Convergence and other checks ---
@@ -258,8 +261,16 @@ class SavingAgent(Agent):
         self.wealth = self.savings  # Next period's wealth is this period's savings
         self.previous_savings = self.savings    # Store current savings for next step
 
+        
+
         print(f"Agent {self.unique_id}: Step end. | Total resources available: {wealth_with_interest:.2f}, Consumption: {consumption:.2f}, Savings: {self.savings:.2f},  Wealth at the end of step: {self.wealth:.2f} ", flush=True)
         print(f"Percentage of total resources consumed: {percentage_consumed:.2f}, percentage saved: {percentage_saved:.2f}")
+
+        self.consumption_history.append(consumption)
+        self.wealth_history.append(self.wealth) # self.wealth is now end-of-step wealth
+        current_step_utility = self.utility(consumption)
+        self.utility_history.append(current_step_utility)
+
         self.step_count += 1    # Increment the step counter
 
     def utility(self, consumption):
@@ -568,11 +579,11 @@ class SavingModel(Model):
 
 # --- Define Agent Profiles ---
 agent_profiles = {
-    "planner": {"beta": 0.97, "delta": 0.96,"vfi_iterations": 500},  # Higher beta = less present bias, higer delta = more patient ° default = "beta": 0.8, "delta": 0.98,"vfi_iterations": 60
-    "moderate": {"beta": 0.90, "delta": 0.91, "vfi_iterations": 60},  # Base values
-    "procrastinator": {"beta": 0.73, "delta": 0.95, "vfi_iterations": 60},  # low beta = more present bias, high delta = more patient, values also future consumption
-    "inverse procrastinator": {"beta": 0.96, "delta": 0.85, "vfi_iterations": 60},
-    "impulsive": {"beta": 0.60, "delta": 0.80, "vfi_iterations": 60},  # lower beta = more present bias, lower delta = less patient
+    "planner": {"beta": 0.97, "delta": 0.96,"vfi_iterations": 1500},  # Higher beta = less present bias, higer delta = more patient ° default = "beta": 0.8, "delta": 0.98,"vfi_iterations": 60
+    "moderate": {"beta": 0.90, "delta": 0.91, "vfi_iterations": 1500},  # Base values
+    "procrastinator": {"beta": 0.73, "delta": 0.95, "vfi_iterations": 1500},  # low beta = more present bias, high delta = more patient, values also future consumption
+    "inverse procrastinator": {"beta": 0.96, "delta": 0.85, "vfi_iterations": 1500},
+    "impulsive": {"beta": 0.60, "delta": 0.80, "vfi_iterations": 1500},  # lower beta = more present bias, lower delta = less patient
 }
 
 sigma = 0.4387 # inverse of IES
@@ -619,13 +630,13 @@ with open(output_file_path, "w") as output_file:
     print("="*70)
 '''
 #---------------------------------------------------------PROFILING BLOCK----------------------------------------------------------------------------------
-# --- Parameters for the SLOW SCENARIO you want to profile ---
-PROFILE_TO_DEBUG = "planner" 
-INTEREST_RATE_TO_DEBUG = 1.02
-NUM_WEALTH_POINTS_DEBUG = 150 #wealth_grid size for profiling
-# The VFI iterations are set inside SavingAgent.step()
+PROFILES_TO_ITERATE = list(agent_profiles.keys()) 
+INTEREST_RATES_TO_ITERATE = [1.02, 1.10, 1.30] 
 
-SIMULATION_STEPS_FOR_PROFILING_VFI = 1 # VFI happens in the agent's first step, so 1 is enough.
+# These parameters will be common for all profiling runs in this iteration
+NUM_WEALTH_POINTS_FOR_PROFILING = 5000 # Size of the wealth_grid for these profiling runs
+SIMULATION_STEPS_PER_RUN = 12 # Number of steps for each individual simulation run (VFI usually happens in step 1)
+
 
 # --- Setup Output Directories (same as before) ---
 output_dir_text = "output_text"
@@ -634,137 +645,189 @@ os.makedirs(output_dir_text, exist_ok=True)
 output_dir_plots = "output_plots"
 os.makedirs(output_dir_plots, exist_ok=True)
 # Use a distinct log file for profiling output
-output_file_path = os.path.join(output_dir_text, "simulation_output_PROFILING.txt")
+iterative_profiling_log_path = os.path.join(output_dir_text, "simulation_output_ITERATIVE_PROFILING.txt")
 
 # --- Redirect Output to File  ---
-print(f"Redirecting simulation stdout log to: {output_file_path}")
-with open(output_file_path, "w") as output_file:
+print(f"Redirecting simulation stdout log to: {iterative_profiling_log_path}")
+with open(iterative_profiling_log_path, "w") as output_file: 
     original_stdout = sys.stdout
     sys.stdout = output_file # Redirect standard output
 
     # --- START OF PROFILING LOGIC ---
     print("="*70, flush=True)
-    print(f"Starting PROFILING Run for VFI", flush=True)
-    print(f"Target Profile: {PROFILE_TO_DEBUG}, Target Interest Rate: {INTEREST_RATE_TO_DEBUG}", flush=True)
-    print(f"Wealth Grid Points: {NUM_WEALTH_POINTS_DEBUG}", flush=True)
-    #print(f"Agent VFI Iterations: (Ensure agent uses your high value, e.g., 5000)", flush=True)
-    print(f"Simulation Steps for this run: {SIMULATION_STEPS_FOR_PROFILING_VFI}", flush=True)
+    print(f"Starting ITERATIVE PROFILING Runs", flush=True)
+    print(f"Target Profiles: {PROFILES_TO_ITERATE}", flush=True)
+    print(f"Target Interest Rates: {INTEREST_RATES_TO_ITERATE}", flush=True)
+    print(f"Wealth Grid Points for each run: {NUM_WEALTH_POINTS_FOR_PROFILING}", flush=True)
+    print(f"Simulation Steps for each run: {SIMULATION_STEPS_PER_RUN}", flush=True)
     print("="*70, flush=True)
 
-    profiler = cProfile.Profile() # Create a profiler object
 
-    if PROFILE_TO_DEBUG not in agent_profiles:
-        print(f"ERROR: Profile '{PROFILE_TO_DEBUG}' not found in agent_profiles.", flush=True)
-        sys.exit()
-    profile_config = agent_profiles[PROFILE_TO_DEBUG]
-
-    # Retrieve expected iterations for printing
-    expected_vfi_iterations = profile_config.get("vfi_iterations", "DEFAULT(50)")
-    print(f"Expecting Agent VFI Iterations: {expected_vfi_iterations}", flush=True)
-
-    start_time_sim = time.time()
-    print(f"--- Profiling for Profile: {PROFILE_TO_DEBUG}, Interest Rate (R): {INTEREST_RATE_TO_DEBUG:.2f} ---", flush=True)
-
-    model = None # Initialize model to None
-    try:
-        # Enable profiler
-        profiler.enable()
-
-        # Initialize model
-        model = SavingModel(profile_config, # Contains beta, delta, vfi_iterations
-                            INTEREST_RATE_TO_DEBUG,
-                            sigma,
-                            wealth_dist,
-                            num_wealth_points=NUM_WEALTH_POINTS_DEBUG)
-
-        # Run the simulation step
-        for i in range(SIMULATION_STEPS_FOR_PROFILING_VFI):
-            model.step()
-
-    except Exception as e:
-        # Handle exceptions during the profiled section
-        print(f"\n!!!!!! ERROR during PROFILING run !!!!!!", flush=True)
-        print(f"Error type: {type(e).__name__}", flush=True)
-        print(f"Error message: {e}", flush=True)
-        import traceback
-        output_file.write("\nTraceback:\n")
-        traceback.print_exc(file=output_file)
-        print("!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!", flush=True)
-    finally:
+    for current_profile_name in PROFILES_TO_ITERATE:
+        if current_profile_name not in agent_profiles:
+            print(f"\nXXXXX SKIPPING: Profile '{current_profile_name}' not found in agent_profiles. XXXXX\n", flush=True)
+            continue
         
-        if 'profiler' in locals(): # Check if profiler was created
-            profiler.disable() # Safe to call disable even if not enabled or already disabled
-            print("Profiler disabled.", flush=True)
+        profile_config_for_run = agent_profiles[current_profile_name]
+        expected_vfi_iterations = profile_config_for_run.get("vfi_iterations", "DEFAULT(50)")
 
-            end_time_sim = time.time()
-            print(f"Simulation (including VFI) for profiling completed/stopped in {end_time_sim - start_time_sim:.4f} seconds.", flush=True)
+        # Loop through each interest rate for the current profile
+        for current_interest_rate in INTEREST_RATES_TO_ITERATE:
+            print(f"\n" + "="*70, flush=True)
+            print(f"PROFILING: Profile='{current_profile_name}', R={current_interest_rate:.2f}", flush=True)
+            print(f"  Agent VFI Iterations expected: {expected_vfi_iterations}", flush=True)
+            print("="*70, flush=True)
 
-            # --- Print Profiling Stats ---
-            if model: # Only print stats if model was successfully created and run started
-                output_file.write(f"\n\n----- CPROFILE STATS FOR VFI -----\n")
-                output_file.write(f"Profile: {PROFILE_TO_DEBUG}, R={INTEREST_RATE_TO_DEBUG:.2f}, GridPoints: {NUM_WEALTH_POINTS_DEBUG}\n")
-                stats = pstats.Stats(profiler, stream=output_file).sort_stats('cumulative')
-                stats.print_stats(50)
-                output_file.write(f"----- END CPROFILE STATS -----\n\n")
-                print("Profiling stats written to log file.", flush=True)
-            else:
-                print("Profiling stats not generated due to error before/during model run.", flush=True)
+            profiler_for_run = cProfile.Profile() # Initialize a new profiler for each combination
+            model_for_run = None # Initialize model to None for each run
+            run_start_time = time.time()
 
-            if model and hasattr(model.schedule.agents[0], 'V_snapshots'):
-                print("Generating V and g snapshot plots...", flush=True)
-                agent_for_plots = model.schedule.agents[0]
-                wealth_grid_for_plots = model.wealth_grid
-                
-                num_snapshots = len(agent_for_plots.V_snapshots)
-                if num_snapshots > 0:
-                    # Plot V snapshots
-                    plt.figure(figsize=(12, 6))
-                    for iter_num, v_snap in agent_for_plots.V_snapshots.items():
-                        plt.plot(wealth_grid_for_plots, v_snap, label=f'V iter {iter_num}')
-                    plt.title(f'Value Function (V) Snapshots\nProfile: {PROFILE_TO_DEBUG}, R={INTEREST_RATE_TO_DEBUG:.2f}, Delta={agent_for_plots.delta}, Grid={len(wealth_grid_for_plots)}')
-                    plt.xlabel('Wealth (k)')
-                    plt.ylabel('Value V(k)')
-                    plt.legend()
-                    plt.grid(True)
-                    plot_filename_v_snap = os.path.join(output_dir_plots, f"V_snapshots_{PROFILE_TO_DEBUG}_R{INTEREST_RATE_TO_DEBUG:.2f}.png")
-                    try:
-                        plt.savefig(plot_filename_v_snap)
-                        print(f"Saved V snapshots plot: {plot_filename_v_snap}", flush=True)
-                    except Exception as e_plot:
-                        print(f"Error saving V snapshots plot: {e_plot}", flush=True)
-                    plt.close()
+            try:
+                profiler_for_run.enable()
 
-                    # Plot g snapshots
-                    plt.figure(figsize=(12, 6))
-                    for iter_num, g_snap in agent_for_plots.g_snapshots.items():
-                        plt.plot(wealth_grid_for_plots, g_snap, label=f'g iter {iter_num} (Savings k\')')
-                    plt.plot(wealth_grid_for_plots, wealth_grid_for_plots, 'k--', label='k\' = k (45-deg line)', alpha=0.7) # 45-degree line
-                    plt.title(f'Policy Function (g) Snapshots\nProfile: {PROFILE_TO_DEBUG}, R={INTEREST_RATE_TO_DEBUG:.2f}, Delta={agent_for_plots.delta}, Grid={len(wealth_grid_for_plots)}')
-                    plt.xlabel('Current Wealth (k)')
-                    plt.ylabel('Next Period Wealth (k\') = Savings')
-                    plt.legend()
-                    plt.grid(True)
-                    plot_filename_g_snap = os.path.join(output_dir_plots, f"g_snapshots_{PROFILE_TO_DEBUG}_R{INTEREST_RATE_TO_DEBUG:.2f}.png")
-                    try:
-                        plt.savefig(plot_filename_g_snap)
-                        print(f"Saved g snapshots plot: {plot_filename_g_snap}", flush=True)
-                    except Exception as e_plot:
-                        print(f"Error saving g snapshots plot: {e_plot}", flush=True)
-                    plt.close()
+                model_for_run = SavingModel(
+                    profile_config_for_run,
+                    current_interest_rate,
+                    sigma, # Global sigma
+                    wealth_dist, # Global wealth_dist
+                    num_wealth_points=NUM_WEALTH_POINTS_FOR_PROFILING
+                )
+
+                for i in range(SIMULATION_STEPS_PER_RUN):
+                    # print(f"  Model Step {i+1}/{SIMULATION_STEPS_PER_RUN}", flush=True) # Optional per-step log
+                    model_for_run.step()
+
+            except Exception as e:
+                output_file.write(f"\n!!!!!! ERROR during PROFILING run for Profile: {current_profile_name}, R={current_interest_rate:.2f} !!!!!!\n")
+                output_file.write(f"Error type: {type(e).__name__}\n")
+                output_file.write(f"Error message: {str(e)}\n")
+                import traceback
+                output_file.write("\nTraceback:\n")
+                traceback.print_exc(file=output_file)
+                output_file.write("!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!\n")
+                print(f"ERROR encountered for {current_profile_name}, R={current_interest_rate}, see log.", flush=True)
+            finally:
+                if 'profiler_for_run' in locals(): # Check if profiler was created for this run
+                    profiler_for_run.disable()
+                    # print("Profiler disabled for this run.", flush=True) # Optional
+
+                run_end_time = time.time()
+                print(f"Simulation (including VFI) for Profile='{current_profile_name}', R={current_interest_rate:.2f} completed/stopped in {run_end_time - run_start_time:.4f} seconds.", flush=True)
+
+                if model_for_run: # Only print stats and plots if model was successfully created
+                    output_file.write(f"\n\n----- CPROFILE STATS FOR VFI -----\n")
+                    output_file.write(f"Profile: {current_profile_name}, R={current_interest_rate:.2f}, GridPoints: {NUM_WEALTH_POINTS_FOR_PROFILING}\n")
+                    stats_for_run = pstats.Stats(profiler_for_run, stream=output_file).sort_stats('cumulative')
+                    stats_for_run.print_stats(50) # Print top 50 functions by cumulative time
+                    output_file.write(f"----- END CPROFILE STATS -----\n\n")
+                    print("Profiling stats for this run written to log file.", flush=True)
+
+                    if hasattr(model_for_run.schedule, 'agents') and model_for_run.schedule.agents: # Check if agents list exists and is not empty
+                        if hasattr(model_for_run.schedule.agents[0], 'V_snapshots'): # Now safe to access agent
+                            agent_for_plots = model_for_run.schedule.agents[0]
+                            wealth_grid_for_plots = model_for_run.wealth_grid
+                        
+                        print("Generating V and g snapshot plots for this run...", flush=True)
+                        # V snapshots plot
+                        if len(agent_for_plots.V_snapshots) > 0:
+                            plt.figure(figsize=(12, 6))
+                            for iter_num, v_snap in agent_for_plots.V_snapshots.items():
+                                plt.plot(wealth_grid_for_plots, v_snap, label=f'V iter {iter_num}')
+                            plt.title(f'Value Function (V) Snapshots\nProfile: {current_profile_name}, Beta={agent_for_plots.beta:.2f}, Delta={agent_for_plots.delta:.2f}, R={current_interest_rate:.2f}, Grid={len(wealth_grid_for_plots)}')
+                            plt.xlabel('Wealth (k)')
+                            plt.ylabel('Value V(k)')
+                            plt.legend()
+                            plt.grid(True)
+                            plot_filename_v_snap = os.path.join(output_dir_plots, f"V_snapshots_{current_profile_name}_R{current_interest_rate:.2f}.png")
+                            try:
+                                plt.savefig(plot_filename_v_snap)
+                                print(f"Saved V snapshots plot: {plot_filename_v_snap}", flush=True)
+                            except Exception as e_plot:
+                                print(f"Error saving V snapshots plot: {e_plot}", flush=True)
+                            plt.close() # Close the figure
+
+                        # G snapshots plot
+                        if len(agent_for_plots.g_snapshots) > 0:
+                            plt.figure(figsize=(12, 6))
+                            for iter_num, g_snap in agent_for_plots.g_snapshots.items():
+                                plt.plot(wealth_grid_for_plots, g_snap, label=f'g iter {iter_num} (Savings k\')')
+                            plt.plot(wealth_grid_for_plots, wealth_grid_for_plots, 'k--', label='k\' = k (45-deg line)', alpha=0.7)
+                            plt.title(f'Policy Function (g) Snapshots\nProfile: {current_profile_name}, Beta={agent_for_plots.beta:.2f}, Delta={agent_for_plots.delta:.2f}, R={current_interest_rate:.2f}, Grid={len(wealth_grid_for_plots)}')
+                            plt.xlabel('Current Wealth (k)')
+                            plt.ylabel('Next Period Wealth (k\') = Savings')
+                            plt.legend()
+                            plt.grid(True)
+                            plot_filename_g_snap = os.path.join(output_dir_plots, f"g_snapshots_{current_profile_name}_R{current_interest_rate:.2f}.png")
+                            try:
+                                plt.savefig(plot_filename_g_snap)
+                                print(f"Saved g snapshots plot: {plot_filename_g_snap}", flush=True)
+                            except Exception as e_plot:
+                                print(f"Error saving g snapshots plot: {e_plot}", flush=True)
+                            plt.close() # Close the figure
+                        
+                        # --- Additional Time Series Plots ---
+                        print("Generating additional time series plots for this run...", flush=True)
+                        num_steps_completed = agent_for_plots.step_count
+                        if num_steps_completed > 0:
+                            time_axis_consum_util = range(1, num_steps_completed + 1)
+                            time_axis_wealth = range(num_steps_completed + 1)
+
+                            # Consumption Plot
+                            plt.figure(figsize=(10, 6))
+                            plt.plot(time_axis_consum_util, agent_for_plots.consumption_history, marker='o', linestyle='-', label="Consumption")
+                            plt.title(f'Agent Consumption Over Time\nProfile: {current_profile_name}, Beta={agent_for_plots.beta:.2f}, Delta={agent_for_plots.delta:.2f}, R={current_interest_rate:.2f}')
+                            plt.xlabel('Time Step'); plt.ylabel('Consumption')
+                            if num_steps_completed <= 20: plt.xticks(range(1, num_steps_completed + 1))
+                            plt.grid(True); plt.legend()
+                            plot_filename_consum = os.path.join(output_dir_plots, f"TimeSeries_Consumption_{current_profile_name}_R{current_interest_rate:.2f}.png")
+                            try: plt.savefig(plot_filename_consum); print(f"Saved plot: {plot_filename_consum}", flush=True)
+                            except Exception as e: print(f"Error saving plot {plot_filename_consum}: {e}", flush=True)
+                            plt.close()
+
+                            # Wealth Plot
+                            plt.figure(figsize=(10, 6))
+                            plt.plot(time_axis_wealth, agent_for_plots.wealth_history, marker='o', linestyle='-', label="Wealth")
+                            plt.title(f'Agent Wealth Over Time\nProfile: {current_profile_name}, Beta={agent_for_plots.beta:.2f}, Delta={agent_for_plots.delta:.2f}, R={current_interest_rate:.2f}')
+                            plt.xlabel('Time Step (0 = Initial Wealth)'); plt.ylabel('Wealth')
+                            if num_steps_completed <= 20: plt.xticks(range(num_steps_completed + 1))
+                            plt.grid(True); plt.legend()
+                            plot_filename_wealth = os.path.join(output_dir_plots, f"TimeSeries_Wealth_{current_profile_name}_R{current_interest_rate:.2f}.png")
+                            try: plt.savefig(plot_filename_wealth); print(f"Saved plot: {plot_filename_wealth}", flush=True)
+                            except Exception as e: print(f"Error saving plot {plot_filename_wealth}: {e}", flush=True)
+                            plt.close()
+
+                            # Utility Plot
+                            plt.figure(figsize=(10, 6))
+                            plt.plot(time_axis_consum_util, agent_for_plots.utility_history, marker='o', linestyle='-', label="Utility")
+                            plt.title(f'Agent Utility Over Time\nProfile: {current_profile_name}, Beta={agent_for_plots.beta:.2f}, Delta={agent_for_plots.delta:.2f}, R={current_interest_rate:.2f}')
+                            plt.xlabel('Time Step'); plt.ylabel('Utility')
+                            if num_steps_completed <= 20: plt.xticks(range(1, num_steps_completed + 1))
+                            plt.grid(True); plt.legend()
+                            plot_filename_utility = os.path.join(output_dir_plots, f"TimeSeries_Utility_{current_profile_name}_R{current_interest_rate:.2f}.png")
+                            try: plt.savefig(plot_filename_utility); print(f"Saved plot: {plot_filename_utility}", flush=True)
+                            except Exception as e: print(f"Error saving plot {plot_filename_utility}: {e}", flush=True)
+                            plt.close()
+                        else:
+                            print("No agent steps completed, skipping time series plots for this run.", flush=True)
+                    else:
+                        print("Agent data for plots not found for this run.", flush=True)
                 else:
-                    print("No snapshots found to plot.", flush=True)
+                    print("Model not successfully initialized, skipping stats and plots for this run.", flush=True)
+                
+                plt.close('all') # Close any remaining figures for this iteration to save memory
 
-    
-        
+            print(f"----- COMPLETED RUN for Profile='{current_profile_name}', R={current_interest_rate:.2f} -----\n", flush=True)
+            # End of interest rate loop
+        # End of profile loop
 
     print("\n" + "="*70, flush=True)
-    print("PROFILING Run Completed.", flush=True)
+    print("ALL ITERATIVE PROFILING Runs Completed.", flush=True)
     print("="*70 + "\n", flush=True)
-    # --- END OF PROFILING LOGIC ---
 
 # --- Restore Standard Output ---
 sys.stdout = original_stdout
-print(f"\nSimulation stdout log (with profiling data) saved to: {output_file_path}")
+print(f"\nIterative profiling stdout log saved to: {iterative_profiling_log_path}")
+print(f"All plots saved to directory: {output_dir_plots}")
 '''
     # Loop through agent profiles first
     
