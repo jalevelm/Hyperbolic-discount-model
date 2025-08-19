@@ -107,13 +107,11 @@ class SavingAgent(Agent):
     def step(self):
         """
         Advances the agent by one time step. This encompasses:
-        1. Calculating the value and policy functions (if not already done).
-        2. Determining optimal savings based on the policy function.
-        3. Updating the agent's wealth based on its savings decision.
-        4. Updating internal tracking variables.
-
-        The agent's decision-making process aims to approximate a Markov
-        equilibrium in a dynamic savings game with hyperbolic discounting.
+        1. Checking a cache for pre-computed VFI results.
+        2. Calculating the value and policy functions (if not found in cache).
+        3. Storing new VFI results in the cache.
+        4. Determining optimal savings based on the policy function.
+        5. Updating the agent's wealth based on its savings decision.
         """
 
         # --- Initialization (First Step Only) ---
@@ -126,111 +124,66 @@ class SavingAgent(Agent):
 
         wealth_grid = self.model.wealth_grid    # Access the pre-defined wealth grid
 
-        # --- Value Function and Policy Function Calculation (One-Time) ---
+        # --- VFI Optimization with Cache ---
         if not self.value_function_calculated:
-            #print(f"Agent {self.unique_id}: Starting value iteration...")
-            # Initialize value and policy functions as NumPy arrays
-            V = np.zeros_like(wealth_grid)
-            g = np.zeros_like(wealth_grid)
-         
-            iterations_to_snapshot = [1, 50 ,100, 150, 200, 250, 300, 350, 400, 450, 500, 600, 700, 750, 1000, 1250, 1500]
-    
-
-            # --- Value Iteration Algorithm ---
-            tolerance = 1e-6  # Convergence tolerance
-            iteration_count = 0   # Iteration counter
-
-            total_optimization_time = 0  # Accumulate optimization times
-            total_inner_loop_time = 0
-
-            outer_loop_start_time = time.time()
-
-            print(f"Agent {self.unique_id}: Starting value iteration with wealth_grid size {len(wealth_grid)} and max_iters {self.max_vfi_iterations}", flush=True)
-
-            for _ in range(self.max_vfi_iterations):
-                iteration_count += 1 
-                V_old = V.copy()    # Store the previous iteration's value function
-                g_old_this_iter = g.copy()
-
-                inner_loop_start_time = time.time()
-
-                # Iterate over all possible wealth levels in the grid
-                for i, k_val in enumerate(wealth_grid):
-
-                    if i % (len(wealth_grid) // 10) == 0 and iteration_count == 1 : # Ensure it's iteration_count == 1
-                        print(f"Agent {self.unique_id}: VFI Iter {iteration_count}, Processing wealth_grid index {i}/{len(wealth_grid)}", flush=True)
-        
-                    # Find the optimal savings and continuation value using the
-                    # current value function (V) and the agent's parameters.
-                    continuation_value, next_k, _ = self.optimize_savings(k_val, V_old, wealth_grid) # NOTE: V here is the V being updated, not V_old
-
-                    # Calculate consumption based on the budget constraint
-                    consumption = self.model.interest_rate * k_val - next_k
-                    consumption = max(consumption, 1e-9)    # Ensure consumption >= 0
-
-                    # Update the value function: current utility + discounted future utility
-                    V[i] = self.utility(consumption) + self.delta * continuation_value                                       #or self.beta
-                    g[i] = next_k # Store the optimal next-period wealth (savings)
-
-                inner_loop_end_time = time.time()
-                total_inner_loop_time += (inner_loop_end_time - inner_loop_start_time)
-
-
-               
-                if iteration_count in iterations_to_snapshot:
-                    self.V_snapshots[iteration_count] = V.copy()
-                    self.g_snapshots[iteration_count] = g.copy()
-
-
-                diff_V = np.max(np.abs(V - V_old)) 
-                abs_diff_g_array = np.abs(g - g_old_this_iter)
-                diff_g = np.max(abs_diff_g_array)
-                if diff_g > 0: # Avoid error if diff_g is zero (no single max index then)
-                    idx_max_diff_g = np.argmax(abs_diff_g_array)
-                    k_val_max_diff_g = wealth_grid[idx_max_diff_g]
-                else:
-                    k_val_max_diff_g = np.nan # Or some other placeholder if diff_g is 0
-
-
+            # Check if the VFI solution for this agent's profile is already in the model's cache
+            if self.profile_name in self.model.vfi_cache:
+                print(f"Agent {self.unique_id} ({self.profile_name}): Cache HIT. Retrieving V and g functions.", flush=True)
+                # If it exists, retrieve it from the cache
+                self.V, self.g = self.model.vfi_cache[self.profile_name]
+                self.value_function_calculated = True
+            else:
+                # If not in cache (Cache MISS), this agent must run the VFI
+                print(f"Agent {self.unique_id} ({self.profile_name}): Cache MISS. Starting value function iteration.", flush=True)
+                V = np.zeros_like(wealth_grid)
+                g = np.zeros_like(wealth_grid)
+                tolerance = 1e-6
+                iteration_count = 0
                 
-                if iteration_count % 20 == 0: 
-                    print(f"Agent {self.unique_id}: VFI Iteration {iteration_count}/{self.max_vfi_iterations}, Diff_V: {diff_V:.4e}, Diff_g: {diff_g:.4e} (at k={k_val_max_diff_g:.2f})", flush=True)
-                
-                # --- Convergence and other checks ---
-                if np.any(np.isnan(V)) or np.any(np.isinf(V)):
-                    print(f"Agent {self.unique_id}: NaN/Inf detected in V after iteration {iteration_count}! Diff_V: {diff_V:.4e}, Diff_g: {diff_g:.4e} (at k={k_val_max_diff_g:.2f})", flush=True)
-                    break
+                outer_loop_start_time = time.time()
 
-                if np.any(np.abs(V) > 1e6): # Check for divergence
-                    print(f"Agent {self.unique_id}: Value function is likely diverging at iteration {iteration_count}! Diff_V: {diff_V:.4e}, Diff_g: {diff_g:.4e} (at k={k_val_max_diff_g:.2f})", flush=True)
-                    raise ValueError("Value function is likely diverging")
+                for _ in range(self.max_vfi_iterations):
+                    iteration_count += 1
+                    V_old = V.copy()
 
+                    g_old_this_iter = g.copy()  
+                    
+                    for i, k_val in enumerate(wealth_grid):
+                        continuation_value, next_k, _ = self.optimize_savings(k_val, V_old, wealth_grid)
+                        consumption = max(self.model.interest_rate * k_val - next_k, 1e-9)
+                        V[i] = self.utility(consumption) + self.delta * continuation_value
+                        g[i] = next_k
 
-                if diff_V < tolerance:   # Check for convergence based on Value Function
-                    print(f"Agent {self.unique_id}: Value function converged after {iteration_count} iterations. Diff_V: {diff_V:.4e}, Diff_g: {diff_g:.4e} (at k={k_val_max_diff_g:.2f})", flush=True)
-                    break    
-            else: # Loop finished without break (no convergence)
-                # Also ensure k_val_max_diff_g is defined here if the loop runs to completion
-                if 'k_val_max_diff_g' not in locals(): # Handle case if loop was very short
+                    diff_V = np.max(np.abs(V - V_old))
+
+                    
+                    abs_diff_g_array = np.abs(g - g_old_this_iter)
+                    diff_g = np.max(abs_diff_g_array)
                     k_val_max_diff_g = np.nan
-                print(f"Agent {self.unique_id}: Value function DID NOT converge after {iteration_count} iterations. Final Diff_V: {diff_V:.4e}, Diff_g: {diff_g:.4e} (at k={k_val_max_diff_g:.2f})", flush=True)
+                    if diff_g > 0:
+                        idx_max_diff_g = np.argmax(abs_diff_g_array)
+                        k_val_max_diff_g = wealth_grid[idx_max_diff_g]
 
-            outer_loop_end_time = time.time()
-            total_value_iteration_time = outer_loop_end_time - outer_loop_start_time
+                    if iteration_count % 20 == 0: 
+                        print(f"Agent {self.unique_id}: VFI Iteration {iteration_count}/{self.max_vfi_iterations}, Diff_V: {diff_V:.4e}, Diff_g: {diff_g:.4e} (at k={k_val_max_diff_g:.2f})", flush=True)
+                    
+                    
+                    if diff_V < tolerance:
+                        print(f"Agent {self.unique_id}: Value function converged after {iteration_count} iterations.", flush=True)
+                        break
+                else:
+                    print(f"Agent {self.unique_id}: Value function DID NOT converge after {self.max_vfi_iterations} iterations.", flush=True)
 
-            average_optimization_time = total_optimization_time / (iteration_count * len(wealth_grid)) if iteration_count > 0 else 0
-            average_inner_loop_time = total_inner_loop_time / iteration_count if iteration_count > 0 else 0
+                total_value_iteration_time = time.time() - outer_loop_start_time
+                print(f"Agent {self.unique_id}: Total value iteration took {total_value_iteration_time:.4f} seconds.", flush=True)
+                
+                self.V = V
+                self.g = g
+                self.value_function_calculated = True
 
-
-            print(f"Agent {self.unique_id}: Total value iteration took {total_value_iteration_time:.6f} seconds", flush=True)
-            print(f"Agent {self.unique_id}: Average optimization time: {average_optimization_time:.8f} seconds", flush=True)
-            print(f"Agent {self.unique_id}: Average inner loop time: {average_inner_loop_time:.6f} seconds", flush=True)
-
-
-            # Store the calculated value and policy functions
-            self.V = V
-            self.g = g
-            self.value_function_calculated = True   # Set flag to avoid recalculation
+                # Store the newly computed result in the model's cache
+                print(f"Agent {self.unique_id} ({self.profile_name}): Storing V and g functions in cache for profile '{self.profile_name}'.", flush=True)
+                self.model.vfi_cache[self.profile_name] = (self.V, self.g)
 
         # --- Agent's Decision (Every Step) ---
 
@@ -271,7 +224,6 @@ class SavingAgent(Agent):
         self.wealth_history.append(self.wealth) # self.wealth is now end-of-step wealth
         current_step_utility = self.utility(consumption)
         self.utility_history.append(current_step_utility)
-
         self.step_count += 1    # Increment the step counter
 
     def utility(self, consumption):
@@ -468,6 +420,8 @@ class SavingModel(Model):
         # compatibility with potential future multi-agent extensions.
         self.grid = MultiGrid(10, 10, True)  # A 10x10 grid
         self.schedule = RandomActivation(self)  # Random activation scheduler
+
+        self.vfi_cache = {}
 
         if self.max_wealth <= min_grid_wealth:
             raise ValueError(f"max_wealth ({self.max_wealth}) must be greater than min_grid_wealth ({min_grid_wealth})")
