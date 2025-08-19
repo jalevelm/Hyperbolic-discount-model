@@ -55,7 +55,7 @@ class SavingAgent(Agent):
             wealth level (savings) for each possible current wealth level.
             Initialized to None, calculated during the first step.
     """
-    def __init__(self, unique_id, model, beta, delta, init_wealth, sigma, borrowing_limit, iterations=50):
+    def __init__(self, unique_id, model, profile_name, beta, delta, init_wealth, sigma, borrowing_limit, iterations=50):
         """
         Initializes a new SavingAgent.
 
@@ -70,6 +70,7 @@ class SavingAgent(Agent):
         """
         super().__init__(unique_id, model)  # Call the superclass constructor
 
+        self.profile_name = profile_name
         # --- Agent Preferences and State ---
         self.beta = beta        # Present bias
         self.delta = delta      # Discount factor
@@ -436,7 +437,7 @@ class SavingModel(Model):
             model and agent-level data during the simulation.
     """
     
-    def __init__(self, agent_profile, interest_rate, sigma, wealth_dist, num_wealth_points=100):
+    def __init__(self, population_composition, interest_rate, sigma, wealth_dist, num_wealth_points=100):
         """
         Initializes the SavingModel.
 
@@ -453,7 +454,7 @@ class SavingModel(Model):
         super().__init__()  # Initialize the Model superclass
 
         # --- Model Parameters ---
-        self.num_agents = 1  #Number of agents
+        self.num_agents = sum(population_composition.values())
         self.interest_rate = interest_rate  # Constant gross interest rate
         self.sigma = sigma  # inv. of intertemporal substitution
         self.max_wealth = 1000001  # Upper bound for the wealth grid
@@ -479,7 +480,7 @@ class SavingModel(Model):
 
 
         # --- Create the Agent ---
-        self.create_agent(agent_profile)    # Create and add the agent
+        self.create_agents(population_composition)    # Create and add the agent
 
         # --- Data Collection ---
         # Define consumption calculation carefully based on when savings are decided
@@ -503,6 +504,14 @@ class SavingModel(Model):
 
 
         self.datacollector = DataCollector(
+            model_reporters={
+                "Average Wealth": lambda m: np.mean([agent.wealth for agent in m.schedule.agents]),
+                "Median Wealth": lambda m: np.median([agent.wealth for agent in m.schedule.agents]),
+                "Std. Dev. Wealth": lambda m: np.std([agent.wealth for agent in m.schedule.agents]),
+                "Average Consumption": lambda m: np.mean([get_consumption(agent) for agent in m.schedule.agents]),
+                "Average Utility": lambda m: np.mean([get_utility(agent) for agent in m.schedule.agents]),
+                "Average Savings": lambda m: np.mean([agent.savings for agent in m.schedule.agents]),
+            },
             agent_reporters={
                 "Wealth": "wealth", # Wealth at the *end* of the step (i.e., next period's start)
                 "Savings": "savings", # Savings chosen *during* the step
@@ -510,54 +519,66 @@ class SavingModel(Model):
                 "R_star": "R_star",
                 "Interest_Rate": lambda a: a.model.interest_rate,
                 "Utility": get_utility, # Utility from consumption *during* the step
-                "Previous_Wealth": "previous_wealth" 
+                "Previous_Wealth": "previous_wealth", 
+                "Profile": "profile_name"
             }
         )
         print("Model initialized", flush=True)
 
-    def create_agent(self, profile):
+    def create_agents(self, population_composition):
         """
-        Creates a single SavingAgent and adds it to the model.
+        Creates a population of SavingAgents based on the specified composition
+        and adds them to the model's schedule.
 
         Args:
-            profile (dict): A dictionary containing the agent's 'beta' and
-                'delta' values, defining its hyperbolic discounting preferences.
+            population_composition (dict): A dictionary where keys are profile
+                names (str) and values are the number of agents (int) to create
+                for that profile.
         """
-        print(f"Creating agent with profile: {profile}", flush=True)
+        print("Creating agent population...")
+        # The global agent_profiles dictionary is used to get parameters for each profile name
+        global agent_profiles
 
-        # --- Determine Initial Wealth (based on wealth_dist) ---
-        rand_num = random.random()  # Generate a random number between 0 and 1
-        cumulative_prob = 0
-        init_wealth = 0
-        # Iterate through the wealth distribution to determine the agent's
-        # initial wealth based on the defined probabilities.
-        for prob, wealth_range in self.wealth_dist:
-            cumulative_prob += prob
-            if rand_num <= cumulative_prob:
-                init_wealth = random.randint(wealth_range[0], wealth_range[1])
-                break
-        else:
-            # If no range is selected (shouldn't happen with a proper
-            # distribution summing to 1), assign wealth from the last range.
-            init_wealth = random.randint(max(1, self.wealth_dist[-1][1][0]), self.wealth_dist[-1][1][1])
+        # Loop through the population_composition dictionary to create agents for each profile
+        for profile_name, count in population_composition.items():
+            if profile_name not in agent_profiles:
+                print(f"Warning: Profile '{profile_name}' not found in agent_profiles. Skipping.")
+                continue
 
-        agent_vfi_iterations = profile.get("vfi_iterations", 50)
-        print(f"  Passing vfi_iterations={agent_vfi_iterations} to SavingAgent constructor.", flush=True) # Add this print for debugging
+            print(f"  Creating {count} agent(s) with profile: '{profile_name}'")
+            profile_params = agent_profiles[profile_name] # Get the parameters for this profile
 
-    # --- Create and Add the Agent, passing the agent_vfi_iterations ---
-        agent = SavingAgent(self.next_id(), # Or your agent ID generation, e.g., 0 if only one agent
-                        self,
-                        profile["beta"],
-                        profile["delta"],
-                        init_wealth,
-                        self.sigma, # Assuming sigma is a model attribute or passed correctly
-                        self.borrowing_limit,
-                        iterations=agent_vfi_iterations) # <-- MAKE SURE THIS IS PASSED
+            # Create the specified number of agents for the current profile
+            for i in range(count):
+                # --- Determine Initial Wealth for each agent ---
+                rand_num = random.random()
+                cumulative_prob = 0
+                init_wealth = 0
+                for prob, wealth_range in self.wealth_dist:
+                    cumulative_prob += prob
+                    if rand_num <= cumulative_prob:
+                        init_wealth = random.randint(wealth_range[0], wealth_range[1])
+                        break
+                else:
+                    init_wealth = random.randint(max(1, self.wealth_dist[-1][1][0]), self.wealth_dist[-1][1][1])
 
-        self.schedule.add(agent)
-        # Assuming grid placement is still relevant, even if minimal
-        # self.grid.place_agent(agent, (0,0)) # Or however you handle agent placement
-        print(f"Agent created with ID {agent.unique_id} and added to schedule. Initial wealth: {init_wealth}", flush=True)
+                agent_vfi_iterations = profile_params.get("vfi_iterations", 50)
+
+                # --- Create and Add the Agent ---
+                agent = SavingAgent(
+                    unique_id=self.next_id(), # Mesa handles unique IDs
+                    model=self,
+                    profile_name=profile_name,
+                    beta=profile_params["beta"],
+                    delta=profile_params["delta"],
+                    init_wealth=init_wealth,
+                    sigma=self.sigma,
+                    borrowing_limit=self.borrowing_limit,
+                    iterations=agent_vfi_iterations
+                )
+                self.schedule.add(agent)
+
+        print(f"Total agents created and added to schedule: {len(self.schedule.agents)}")
         
 
 
@@ -573,6 +594,8 @@ class SavingModel(Model):
         self.datacollector.collect(self)    # Collect data
         self.schedule.step()    # Advance the agent (and scheduler)
         print("Model step end", flush=True)  # Debug print
+
+'''
 
 # ---------------------------------------------------------- Model run block ------------------------------------------------------------------------
 
@@ -795,3 +818,143 @@ with open(iterative_profiling_log_path, "w") as output_file:
 sys.stdout = original_stdout
 print(f"\nIterative profiling stdout log saved to: {iterative_profiling_log_path}")
 print(f"All plots saved to directory: {output_dir_plots}")
+
+'''
+# ----------------------------------------------------------
+# --- Simulation and Data Export Block ---
+# ----------------------------------------------------------
+
+# --- 1. Define Experimental Parameters ---
+
+# Define Agent Profiles
+agent_profiles = {
+    "planner": {"beta": 0.97, "delta": 0.96,"vfi_iterations": 150},  # Higher beta = less present bias, higer delta = more patient ° default = "beta": 0.8, "delta": 0.98,"vfi_iterations": 60
+    "moderate": {"beta": 0.90, "delta": 0.91, "vfi_iterations": 150},  # Base values
+    "procrastinator": {"beta": 0.73, "delta": 0.95, "vfi_iterations": 150},  # low beta = more present bias, high delta = more patient, values also future consumption
+    "inverse procrastinator": {"beta": 0.96, "delta": 0.85, "vfi_iterations": 150},
+    "impulsive": {"beta": 0.60, "delta": 0.80, "vfi_iterations": 150},  # lower beta = more present bias, lower delta = less patient
+}
+
+# Define Economic Conditions
+sigma = 0.4387
+wealth_dist = [
+    (0.4152, (0, 9999)),
+    (0.4772, (10000, 99999)),
+    (0.1031, (100000, 999999)),
+    (0.0045, (1000000, 1000001))
+]
+
+# Define the population for the experiment
+population_to_simulate = {
+    "planner": 5,
+    "moderate": 10,
+    "impulsive": 8
+}
+
+# Define the conditions to iterate over
+interest_rates_to_test = [1.02, 1.05, 1.10, 1.30]
+SIMULATION_STEPS = 24
+
+# --- 2. Setup Output Directory ---
+output_dir_csv = "output_csv"
+os.makedirs(output_dir_csv, exist_ok=True)
+output_dir_text = "output_text"
+os.makedirs(output_dir_text, exist_ok=True)
+log_filepath = os.path.join(output_dir_text, "simulation_run_log.txt")
+
+print(f"Starting simulation. All detailed output will be saved to: {log_filepath}")
+
+# Use a 'with' block to handle the file and stdout redirection
+with open(log_filepath, "w") as log_file:
+    original_stdout = sys.stdout
+    sys.stdout = log_file # All subsequent 'print' statements go to the log_file
+    print("\n" + "="*50)
+    print("ALL SIMULATIONS COMPLETE...") 
+
+    for rate in interest_rates_to_test:
+        print(f"\n--- Running Simulation for Interest Rate (R) = {rate} ---")
+        
+        # Create a fresh model instance for this condition
+        model = SavingModel(
+            population_composition=population_to_simulate,
+            interest_rate=rate,
+            sigma=sigma,
+            wealth_dist=wealth_dist,
+            num_wealth_points=100 # Size of the wealth_grid
+        )
+        
+        # Run the model
+        for i in range(SIMULATION_STEPS):
+            model.step()
+            
+        print(f"--- Simulation Complete. Exporting data... ---")
+
+        # Retrieve data from the datacollector
+        agent_data = model.datacollector.get_agent_vars_dataframe()
+        model_data = model.datacollector.get_model_vars_dataframe()
+
+        print(f"DEBUG: Columns in agent_data for R={rate} are: {agent_data.columns}")
+
+        print("--- First 15 Profile Values in the DataFrame ---")
+        print(agent_data[['Profile']].head(15))
+        print("---------------------------------------------")
+
+        print("--- Exporting V and g functions for sample agents... ---")
+        
+        # Create a sub-directory for this detailed data
+        output_dir_v_g = os.path.join(output_dir_csv, "v_g_functions")
+        os.makedirs(output_dir_v_g, exist_ok=True)
+
+        # Identify one agent from each profile to save their functions
+        agents_to_save = {}
+
+        for profile in population_to_simulate.keys():
+            print(f"Searching for agents with profile: '{profile}'") 
+            
+            # This is the line that is failing
+            filtered_agents = agent_data[agent_data['Profile'] == profile]
+            
+            if filtered_agents.empty:
+                print(f"  > WARNING: No agents found for profile '{profile}'. Skipping.")
+                continue # Skip to the next profile in the loop
+                
+            first_agent_of_profile = filtered_agents.index.get_level_values('AgentID')[0]
+            agents_to_save[profile] = first_agent_of_profile
+        
+        print(f"Found sample agents to save: {agents_to_save}") 
+
+        for agent in model.schedule.agents:
+            if agent.unique_id in agents_to_save.values():
+                if agent.value_function_calculated:
+                    v_g_base_filename = f"R_{rate}_agent_{agent.unique_id}_{agent.profile_name}"
+                    v_func_path = os.path.join(output_dir_v_g, f"{v_g_base_filename}_value_function.npy")
+                    g_func_path = os.path.join(output_dir_v_g, f"{v_g_base_filename}_policy_function.npy")
+                    
+                    np.save(v_func_path, agent.V)
+                    np.save(g_func_path, agent.g)
+                    print(f"  > Saved V and g for Agent {agent.unique_id} ({agent.profile_name})")
+        
+        # Define descriptive filenames
+        base_filename = f"R_{rate}_pop_{len(model.schedule.agents)}agents_steps_{SIMULATION_STEPS}"
+        agent_data_filepath = os.path.join(output_dir_csv, f"{base_filename}_agent_data.csv")
+        model_data_filepath = os.path.join(output_dir_csv, f"{base_filename}_model_data.csv")
+        
+        # Save data to CSV files
+        agent_data.to_csv(agent_data_filepath)
+        model_data.to_csv(model_data_filepath)
+        
+        print(f"Successfully saved Agent Data to: {agent_data_filepath}")
+        print(f"Successfully saved Model Data to: {model_data_filepath}")
+
+print("\n" + "="*50)
+print("ALL SIMULATIONS COMPLETE. ALL DATA EXPORTED.")
+print(f"Output files are in the '{output_dir_csv}' directory.")
+print("="*50 + "\n")
+
+# --- Restore console output ---
+sys.stdout = original_stdout
+
+# This print statement will appear in your console
+print("Process finished.")
+print(f"All data saved to '{output_dir_csv}'.")
+print(f"Full simulation log saved to '{log_filepath}'.")
