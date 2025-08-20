@@ -218,7 +218,7 @@ class SavingAgent(Agent):
         
 
         print(f"Agent {self.unique_id}: Step end. | Total resources available: {wealth_with_interest:.2f}, Consumption: {consumption:.2f}, Savings: {self.savings:.2f},  Wealth at the end of step: {self.wealth:.2f} ", flush=True)
-        print(f"Percentage of total resources consumed: {percentage_consumed:.2f}, percentage saved: {percentage_saved:.2f}")
+        print(f"Percentage of total resources consumed: {percentage_consumed:.2f}, percentage saved: {percentage_saved:.2f}\n\n")
 
         self.consumption_history.append(consumption)
         self.wealth_history.append(self.wealth) # self.wealth is now end-of-step wealth
@@ -357,6 +357,25 @@ class SavingAgent(Agent):
         return continuation_value_for_bellman, optimal_k_next, final_total_utility_debug
 
 
+def compute_gini(model):
+    """Calculates the Gini coefficient of agent wealth."""
+    agent_wealths = [agent.wealth for agent in model.schedule.agents]
+    if len(agent_wealths) < 2:
+        return 0
+    # Formula for Gini coefficient
+    x = sorted(agent_wealths)
+    n = len(x)
+    cumx = np.cumsum(x, dtype=float)
+    # The Gini coefficient is the area between the Lorenz curve and the line of equality
+    return (n + 1 - 2 * np.sum(cumx) / cumx[-1]) / n
+
+def get_wealth_quantile(model, quantile):
+    """Calculates the wealth at a given quantile."""
+    agent_wealths = [agent.wealth for agent in model.schedule.agents]
+    if not agent_wealths:
+        return 0
+    return np.quantile(agent_wealths, q=quantile)
+
 class SavingModel(Model):
     """
     A Mesa model simulating the saving behavior of agents with
@@ -465,6 +484,9 @@ class SavingModel(Model):
                 "Average Consumption": lambda m: np.mean([get_consumption(agent) for agent in m.schedule.agents]),
                 "Average Utility": lambda m: np.mean([get_utility(agent) for agent in m.schedule.agents]),
                 "Average Savings": lambda m: np.mean([agent.savings for agent in m.schedule.agents]),
+                "Gini_Coefficient": compute_gini,
+                "Wealth_Quantile_10": lambda m: get_wealth_quantile(m, 0.10),
+                "Wealth_Quantile_90": lambda m: get_wealth_quantile(m, 0.90),
             },
             agent_reporters={
                 "Wealth": "wealth", # Wealth at the *end* of the step (i.e., next period's start)
