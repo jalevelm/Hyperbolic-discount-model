@@ -53,6 +53,30 @@ for model_file, agent_file in zip(model_data_files, agent_data_files):
     plt.close()
     print(f"  > Saved aggregate plot: {plot_path}")
 
+    if "Gini_Coefficient" in model_data.columns and "Wealth_Quantile_90" in model_data.columns:
+        fig, axes = plt.subplots(2, 1, figsize=(12, 14), sharex=True)
+        fig.suptitle(f'Wealth Distribution and Inequality (R = {rate})', fontsize=16)
+
+        # Subplot 1: Gini Coefficient
+        model_data["Gini_Coefficient"].plot(ax=axes[0], title="Gini Coefficient Over Time", grid=True, color='red')
+        axes[0].set_ylabel("Gini Coefficient (0 = Equality)")
+        axes[0].set_ylim(0, 1) # Gini is always between 0 and 1
+
+        # Subplot 2: Wealth Quantiles
+        model_data["Wealth_Quantile_10"].plot(ax=axes[1], title="Wealth Quantiles", grid=True, label='10th Percentile (Bottom 10%)')
+        model_data["Wealth_Quantile_90"].plot(ax=axes[1], label='90th Percentile (Top 10%)')
+        axes[1].set_ylabel("Wealth Level")
+        axes[1].set_xlabel("Step")
+        axes[1].legend()
+        axes[1].set_yscale('log') # Use a log scale if the wealth gap is very large
+        axes[1].set_title("Wealth Gap: Top 10% vs. Bottom 10%")
+
+
+        plot_path = os.path.join(output_dir_plots, f"inequality_metrics_R_{rate}.png")
+        plt.savefig(plot_path)
+        plt.close()
+        print(f"  > Saved inequality plot: {plot_path}")
+
     # --- Plot 2: "Zoom-In" on Individual Agents ---
     fig, axes = plt.subplots(4, 1, figsize=(12, 22), sharex=True)
     fig.suptitle(f'Individual Agent Metrics (R = {rate})', fontsize=16)
