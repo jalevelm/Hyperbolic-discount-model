@@ -106,42 +106,55 @@ for model_file, agent_file in zip(model_data_files, agent_data_files):
     
     # --- Plot 3 & 4: V and g functions ---
     output_dir_v_g = os.path.join(output_dir_csv, "v_g_functions")
-    wealth_grid = np.geomspace(1e-6, 1000001, 300) #make sure its the same size as the model one
+    
+    # Find a sample agent ID for each profile to display in the legend
+    profiles = agent_data['Profile'].unique()
+    sample_agent_ids = {}
+    for profile in profiles:
+        first_agent_id = agent_data[agent_data['Profile'] == profile].index.get_level_values('AgentID')[0]
+        sample_agent_ids[profile] = first_agent_id
+
+    # The wealth grid needs to match the one used in the simulation
+    wealth_grid = np.geomspace(1e-6, 1000001, 300) 
+    
     rate_str = f"R_{rate}_"
     npy_files = [f for f in os.listdir(output_dir_v_g) if f.startswith(rate_str)]
-    policy_files = sorted([f for f in npy_files if "policy_function" in f])
     
+    policy_files = sorted([f for f in npy_files if "policy_function" in f])
     if policy_files:
         plt.figure(figsize=(12, 7))
         for g_file in policy_files:
             g_func = np.load(os.path.join(output_dir_v_g, g_file))
-            parts = g_file.split('_')
-            agent_id, profile = parts[3], parts[4]
-            plt.plot(wealth_grid, g_func, label=f'Agent {agent_id} ({profile})')
+            # --- Corrected Label Parsing ---
+            parts = g_file.split('_') # e.g., ['R', '1.3', 'planner', 'policy', 'function.npy']
+            profile = parts[2]
+            agent_id = sample_agent_ids.get(profile, 'N/A') # Get a sample ID for the legend
+            label = f'Agent {agent_id} ({profile})'
+            plt.plot(wealth_grid, g_func, label=label)
 
         plt.plot(wealth_grid, wealth_grid, 'k--', label='k\' = k (No Change)', alpha=0.7)
         plt.title(f'Agent Policy Functions g(k) (R = {rate})')
         plt.xlabel('Current Wealth (k)'); plt.ylabel("Next Period's Wealth / Savings (k')")
         plt.legend(); plt.grid(True)
-        plot_path = os.path.join(output_dir_plots, f"policy_functions_R_{rate}.png")
-        plt.savefig(plot_path)
-        plt.close()
-        print(f"  > Saved policy function plot: {plot_path}")
+        plt.savefig(os.path.join(output_dir_plots, f"policy_functions_R_{rate}.png")); plt.close()
+        print(f"  > Saved policy function plot.")
 
     value_files = sorted([f for f in npy_files if "value_function" in f])
     if value_files:
         plt.figure(figsize=(12, 7))
         for v_file in value_files:
             v_func = np.load(os.path.join(output_dir_v_g, v_file))
-            parts = v_file.split('_')
-            agent_id, profile = parts[3], parts[4]
-            plt.plot(wealth_grid, v_func, label=f'Agent {agent_id} ({profile})')
+            # --- Corrected Label Parsing ---
+            parts = v_file.split('_') # e.g., ['R', '1.3', 'planner', 'value', 'function.npy']
+            profile = parts[2]
+            agent_id = sample_agent_ids.get(profile, 'N/A') # Get a sample ID for the legend
+            label = f'Agent {agent_id} ({profile})'
+            plt.plot(wealth_grid, v_func, label=label)
 
         plt.title(f'Agent Value Functions V(k) (R = {rate})'); plt.xlabel('Current Wealth (k)'); plt.ylabel('Value V(k)')
         plt.legend(); plt.grid(True)
-        plot_path = os.path.join(output_dir_plots, f"value_functions_R_{rate}.png")
-        plt.savefig(plot_path); plt.close()
-        print(f"  > Saved value function plot: {plot_path}")
+        plt.savefig(os.path.join(output_dir_plots, f"value_functions_R_{rate}.png")); plt.close()
+        print(f"  > Saved value function plot.")
 
     # --- Plot 5: Individual Agent Resource Allocation (Stacked Bar Chart) ---
     

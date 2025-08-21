@@ -189,84 +189,98 @@ def get_wealth_quantile(model, quantile):
         return 0
     return np.quantile(agent_wealths, q=quantile)
 
+# --- Standalone VFI Function (now with its own logging) ---
 def calculate_vfi_for_profile(profile_params, model_params):
     """
-    Performs the complete, sequential Value Function Iteration for a given agent profile.
-    This is a standalone function designed to be run in parallel.
+    Performs VFI and writes its detailed progress to a unique log file.
     """
-    # Unpack parameters
+    # Unpack parameters, including the new log_path
+    log_path = profile_params['log_path']
     profile_name = profile_params['name']
-    beta = profile_params['beta']
-    delta = profile_params['delta']
-    max_iterations = profile_params['vfi_iterations']
     
-    R = model_params['interest_rate']
-    sigma = model_params['sigma']
-    wealth_grid = model_params['wealth_grid']
-    borrowing_limit = model_params['borrowing_limit']
-    
-    # R_star is useful for context in the logs
-    R_star = 1 + (1 - delta) / (beta * delta)
-    print(f"VFI ({profile_name}): Starting computation. Beta: {beta}, Delta: {delta}, R: {R}, R_star: {R_star}")
-    
-    start_time = time.time()
+    # This try...finally block ensures that standard output is restored
+    # for the worker process, even if an error occurs.
+    original_stdout = sys.stdout
+    try:
+        # Redirect all print statements within this block to the unique log file
+        with open(log_path, 'w') as log_file:
+            sys.stdout = log_file
 
-    # --- Utility and Optimization functions (nested for encapsulation) ---
-    def utility(consumption):
-        consumption = max(consumption, 1e-9)
-        if sigma == 1: return np.log(consumption)
-        else: return consumption**(1 - sigma) / (1 - sigma)
-
-    def optimize_savings(k, V_old, grid):
-        max_obj_val = -np.inf
-        optimal_k_next = np.clip(k, borrowing_limit, R * k)
-        for k_next_candidate in grid:
-            if not (borrowing_limit <= k_next_candidate <= R * k): continue
-            consumption = R * k - k_next_candidate
-            if consumption > 1e-9:
-                val_at_k_next = np.interp(k_next_candidate, grid, V_old)
-                obj_val = utility(consumption) + beta * delta * val_at_k_next
-                if obj_val > max_obj_val:
-                    max_obj_val = obj_val
-                    optimal_k_next = k_next_candidate
-        continuation_val = np.interp(optimal_k_next, grid, V_old)
-        return continuation_val, optimal_k_next
-
-    # --- Main VFI Loop (Sequential) ---
-    V = np.zeros_like(wealth_grid)
-    g = np.zeros_like(wealth_grid)
-    tolerance = 1e-6
-    
-    for i in range(max_iterations):
-        V_old = V.copy()
-        g_old_this_iter = g.copy()
-        
-        for j, k_val in enumerate(wealth_grid):
-            continuation, next_k = optimize_savings(k_val, V_old, wealth_grid)
-            V[j] = utility(max(R * k_val - next_k, 1e-9)) + delta * continuation
-            g[j] = next_k
-        
-        # --- Add printing logic inside the loop ---
-        diff_V = np.max(np.abs(V - V_old))
-        diff_g_array = np.abs(g - g_old_this_iter)
-        diff_g = np.max(diff_g_array)
-        k_val_max_diff_g = np.nan
-        if diff_g > 0:
-            k_val_max_diff_g = wealth_grid[np.argmax(diff_g_array)]
-
-        if (i + 1) % 20 == 0:
-            print(f"VFI ({profile_name}): Iteration {i+1}/{max_iterations}, Diff_V: {diff_V:.4e}, Diff_g: {diff_g:.4e} (at k={k_val_max_diff_g:.2f})")
-
-        if diff_V < tolerance:
-            total_time = time.time() - start_time
-            print(f"VFI ({profile_name}): CONVERGED after {i+1} iterations.")
-            print(f"VFI ({profile_name}): Total value iteration took {total_time:.4f} seconds.")
-            return (profile_name, V, g)
+            # --- Start of Original VFI Logic ---
+            beta = profile_params['beta']
+            delta = profile_params['delta']
+            max_iterations = profile_params['vfi_iterations']
+            R = model_params['interest_rate']
+            sigma = model_params['sigma']
+            wealth_grid = model_params['wealth_grid']
+            borrowing_limit = model_params['borrowing_limit']
+            R_star = 1 + (1 - delta) / (beta * delta)
             
-    total_time = time.time() - start_time
-    print(f"VFI ({profile_name}): DID NOT CONVERGE after {max_iterations} iterations.")
-    print(f"VFI ({profile_name}): Total value iteration took {total_time:.4f} seconds.")
-    return (profile_name, V, g)
+            print(f"--- VFI Log for Profile: '{profile_name}' ---")
+            print(f"Parameters: Beta={beta}, Delta={delta}, R={R}, R_star={R_star}\n")
+            
+            start_time = time.time()
+
+            # (Nested utility and optimize_savings functions are the same as before)
+            def utility(consumption):
+                consumption = max(consumption, 1e-9)
+                if sigma == 1: return np.log(consumption)
+                else: return consumption**(1 - sigma) / (1 - sigma)
+
+            def optimize_savings(k, V_old, grid):
+                max_obj_val = -np.inf
+                optimal_k_next = np.clip(k, borrowing_limit, R * k)
+                for k_next_candidate in grid:
+                    if not (borrowing_limit <= k_next_candidate <= R * k): continue
+                    consumption = R * k - k_next_candidate
+                    if consumption > 1e-9:
+                        val_at_k_next = np.interp(k_next_candidate, grid, V_old)
+                        obj_val = utility(consumption) + beta * delta * val_at_k_next
+                        if obj_val > max_obj_val:
+                            max_obj_val = obj_val
+                            optimal_k_next = k_next_candidate
+                continuation_val = np.interp(optimal_k_next, grid, V_old)
+                return continuation_val, optimal_k_next
+
+            V = np.zeros_like(wealth_grid)
+            g = np.zeros_like(wealth_grid)
+            tolerance = 1e-6
+            
+            for i in range(max_iterations):
+                V_old = V.copy()
+                g_old_this_iter = g.copy()
+                
+                for j, k_val in enumerate(wealth_grid):
+                    continuation, next_k = optimize_savings(k_val, V_old, wealth_grid)
+                    V[j] = utility(max(R * k_val - next_k, 1e-9)) + delta * continuation
+                    g[j] = next_k
+                
+                diff_V = np.max(np.abs(V - V_old))
+                diff_g_array = np.abs(g - g_old_this_iter)
+                diff_g = np.max(diff_g_array)
+                k_val_max_diff_g = np.nan
+                if diff_g > 0:
+                    k_val_max_diff_g = wealth_grid[np.argmax(diff_g_array)]
+
+                if (i + 1) % 20 == 0:
+                    print(f"VFI Iteration {(i+1)}/{max_iterations}, Diff_V: {diff_V:.4e}, Diff_g: {diff_g:.4e} (at k={k_val_max_diff_g:.2f})")
+
+                if diff_V < tolerance:
+                    total_time = time.time() - start_time
+                    print(f"\nValue function CONVERGED after {i+1} iterations.")
+                    print(f"Total value iteration took {total_time:.4f} seconds.")
+                    # Return results to the main process
+                    return (profile_name, V, g)
+                    
+            total_time = time.time() - start_time
+            print(f"\nValue function DID NOT CONVERGE after {max_iterations} iterations.")
+            print(f"Total value iteration took {total_time:.4f} seconds.")
+            # Return results to the main process
+            return (profile_name, V, g)
+            # --- End of Original VFI Logic ---
+    finally:
+        # Restore standard output for the worker process
+        sys.stdout = original_stdout
 
 class SavingModel(Model):
     """
@@ -322,6 +336,9 @@ class SavingModel(Model):
         # --- Parallel VFI Pre-computation ---
         self.vfi_cache = {}
         unique_profiles_to_compute = population_composition.keys()
+
+        vfi_log_dir = os.path.join(output_dir_text, "vfi_logs")
+        os.makedirs(vfi_log_dir, exist_ok=True)
         
         # Prepare arguments for the parallel function
         model_params = {
@@ -334,7 +351,10 @@ class SavingModel(Model):
         for name in unique_profiles_to_compute:
             params = agent_profiles[name].copy()
             params['name'] = name
+            log_filename = f"R_{interest_rate}_{name}_vfi_log.txt"
+            params['log_path'] = os.path.join(vfi_log_dir, log_filename)
             profile_params_list.append(params)
+            
 
         # Run the VFI for all profiles in parallel [cite: 32]
         # Each call to calculate_vfi_for_profile runs on a separate core
