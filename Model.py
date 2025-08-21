@@ -104,257 +104,70 @@ class SavingAgent(Agent):
         self.wealth_history = [self.init_wealth] # Start with initial wealth for time step 0
         self.utility_history = []
 
-    def step(self):
-        """
-        Advances the agent by one time step. This encompasses:
-        1. Checking a cache for pre-computed VFI results.
-        2. Calculating the value and policy functions (if not found in cache).
-        3. Storing new VFI results in the cache.
-        4. Determining optimal savings based on the policy function.
-        5. Updating the agent's wealth based on its savings decision.
-        """
-
-        # --- Initialization (First Step Only) ---
-        if self.step_count == 0:    
-            print(f"Agent {self.unique_id} ({self.profile_name}): First Step - Beta: {self.beta}, Delta: {self.delta}, R_star: {self.R_star}", flush=True)
-        
-        
-        print(f"Agent {self.unique_id} ({self.profile_name}): Step start. Wealth: {self.wealth}, Previous Savings: {self.previous_savings}", flush=True)
-        print(f"Agent {self.unique_id}: R = {self.model.interest_rate}, R_star = {self.R_star}", flush=True)
-
-        wealth_grid = self.model.wealth_grid    # Access the pre-defined wealth grid
-
-        # --- VFI Optimization with Cache ---
-        if not self.value_function_calculated:
-            # Check if the VFI solution for this agent's profile is already in the model's cache
-            if self.profile_name in self.model.vfi_cache:
-                print(f"Agent {self.unique_id} ({self.profile_name}): Cache HIT. Retrieving V and g functions.", flush=True)
-                # If it exists, retrieve it from the cache
-                self.V, self.g = self.model.vfi_cache[self.profile_name]
-                self.value_function_calculated = True
-            else:
-                # If not in cache (Cache MISS), this agent must run the VFI
-                print(f"Agent {self.unique_id} ({self.profile_name}): Cache MISS. Starting value function iteration.", flush=True)
-                V = np.zeros_like(wealth_grid)
-                g = np.zeros_like(wealth_grid)
-                tolerance = 1e-6
-                iteration_count = 0
-                
-                outer_loop_start_time = time.time()
-                #--------------------------------------------------------------------------------------------------------------------------
-                for _ in range(self.max_vfi_iterations):
-                    iteration_count += 1
-                    V_old = V.copy()
-
-                    g_old_this_iter = g.copy()  
-                    
-                    for i, k_val in enumerate(wealth_grid):
-                        continuation_value, next_k, _ = self.optimize_savings(k_val, V_old, wealth_grid)
-                        consumption = max(self.model.interest_rate * k_val - next_k, 1e-9)
-                        V[i] = self.utility(consumption) + self.delta * continuation_value
-                        g[i] = next_k
-
-                    diff_V = np.max(np.abs(V - V_old))
-
-                    
-                    abs_diff_g_array = np.abs(g - g_old_this_iter)
-                    diff_g = np.max(abs_diff_g_array)
-                    k_val_max_diff_g = np.nan
-                    if diff_g > 0:
-                        idx_max_diff_g = np.argmax(abs_diff_g_array)
-                        k_val_max_diff_g = wealth_grid[idx_max_diff_g]
-
-                    if iteration_count % 20 == 0: 
-                        print(f"Agent {self.unique_id}: VFI Iteration {iteration_count}/{self.max_vfi_iterations}, Diff_V: {diff_V:.4e}, Diff_g: {diff_g:.4e} (at k={k_val_max_diff_g:.2f})", flush=True)
-                    
-                    
-                    if diff_V < tolerance:
-                        print(f"Agent {self.unique_id}: Value function converged after {iteration_count} iterations.", flush=True)
-                        break
-                else:
-                    print(f"Agent {self.unique_id}: Value function DID NOT converge after {self.max_vfi_iterations} iterations.", flush=True)
-
-                total_value_iteration_time = time.time() - outer_loop_start_time
-                print(f"Agent {self.unique_id}: Total value iteration took {total_value_iteration_time:.4f} seconds.", flush=True)
-                #-------------------------------------------------------------------------------------------------------------------------------------------------
-                self.V = V
-                self.g = g
-                self.value_function_calculated = True
-
-                # Store the newly computed result in the model's cache
-                print(f"Agent {self.unique_id} ({self.profile_name}): Storing V and g functions in cache for profile '{self.profile_name}'.", flush=True)
-                self.model.vfi_cache[self.profile_name] = (self.V, self.g)
-
-        # --- Agent's Decision (Every Step) ---
-
-         # Find the index in the wealth grid that is closest to the agent's current wealth
-        wealth_index = np.argmin(np.abs(wealth_grid - self.wealth))
-        optimal_savings = self.g[wealth_index] # Look up optimal savings in policy function
-         # Clip savings to ensure it's within feasible bounds (borrowing limit and max possible wealth)
-        self.savings = np.clip(optimal_savings, self.borrowing_limit, self.model.interest_rate * self.wealth)
-
-
-        # Calculate consumption based on the budget constraint
-        wealth_with_interest=self.model.interest_rate * self.wealth
-        consumption = self.model.interest_rate * self.wealth - self.savings
-        consumption = max(consumption, 1e-9)  # Ensure positive consumption
-        percentage_consumed = (consumption / wealth_with_interest) * 100
-        percentage_saved = (self.savings / wealth_with_interest) * 100
-
-
-        # --- Debugging Prints (End of Step) ---
-        print(f"Agent {self.unique_id}: Step {self.step_count}", flush=True)
-        print(f"  Previous Wealth: {self.previous_wealth:.4f}", flush=True)
-        print(f"  Optimal Savings (before clipping): {optimal_savings:.4f}", flush=True)  
-        print(f"  Calculated Savings (after clipping): {self.savings:.4f}", flush=True)
-        print(f"  New Wealth: {self.wealth:.4f}", flush=True)
-        print(f"  Consumption: {consumption:.4f}", flush=True)
-
-        # --- State Updates ---
-        self.previous_wealth = self.wealth  # Store current wealth for next step
-        self.wealth = self.savings  # Next period's wealth is this period's savings
-        self.previous_savings = self.savings    # Store current savings for next step
-
-        
-
-        print(f"Agent {self.unique_id}: Step end. | Total resources available: {wealth_with_interest:.2f}, Consumption: {consumption:.2f}, Savings: {self.savings:.2f},  Wealth at the end of step: {self.wealth:.2f} ", flush=True)
-        print(f"Percentage of total resources consumed: {percentage_consumed:.2f}, percentage saved: {percentage_saved:.2f}\n\n")
-
-        self.consumption_history.append(consumption)
-        self.wealth_history.append(self.wealth) # self.wealth is now end-of-step wealth
-        current_step_utility = self.utility(consumption)
-        self.utility_history.append(current_step_utility)
-        self.step_count += 1    # Increment the step counter
-
     def utility(self, consumption):
         """
         Calculates the agent's utility from consumption in a single period.
-
-        This uses an isoelastic utility function, a standard form in economics. The specific form
-        is:
-
-            u(c) = c^(1-sigma) / (1-sigma)   if sigma != 1
-            u(c) = ln(c)                     if sigma == 1
-
-        where:
-            c is consumption
-            sigma is the inverse of the elasticity of intertemporal substitution.
-
-        Args:
-            consumption (float): The level of consumption.
-
-        Returns:
-            float: The utility level.
-
-        Raises:
-            None (but includes a safeguard against non-positive consumption).
         """
-        epsilon = 1e-9  # Small positive value to avoid numerical issues.
-
-        # Ensure consumption is positive (or very close to zero).  The
-        # utility function is undefined for zero or negative consumption.
-        consumption = max(consumption, epsilon)  
+        epsilon = 1e-9
+        consumption = max(consumption, epsilon)
 
         if self.sigma == 1:
-            # Special case: sigma = 1 corresponds to logarithmic utility.
             return np.log(consumption)
         else:
-            # General case: isoelastic utility.
             return consumption**(1 - self.sigma) / (1 - self.sigma)
 
-    
-
-    def optimize_savings(self, k, V_old_for_opt, wealth_grid_for_opt): 
+    def step(self):
         """
-        Optimizes the agent's savings decision for a given level of wealth
-        by searching over discrete choices for next period's wealth (k_next)
-        from the provided wealth_grid.
-
-        This function finds the optimal next-period wealth (k_next) from the grid
-        that maximizes the agent's present-biased discounted utility, given its
-        current wealth (k) and the value function from the previous iteration (V_old_for_opt).
-
-        Args:
-            k (float): The agent's current wealth.
-            V_old_for_opt (np.ndarray): The value function from the PREVIOUS VFI iteration.
-            wealth_grid_for_opt (np.ndarray): The discretized grid of possible wealth levels.
-
-        Returns:
-            tuple: A tuple containing:
-                - continuation_value (float): The interpolated value V_old_for_opt(optimal_k_next),
-                                             used for the Bellman equation.
-                - optimal_k_next (float): The chosen next-period wealth from the grid.
-                - final_total_utility (float): The maximized utility (u(c*) + beta*delta*V_old_for_opt(k'*))
-                                               achieved with the optimal_k_next.
-                                               (Note: the Bellman uses delta*V_old_for_opt(k'*),
-                                                the objective function for choice uses beta*delta*V_old_for_opt(k'*))
-
-                Returns (0, k, -np.inf) or similar if no valid option is found.
+        Advances the agent by one time step, printing detailed logs of its actions.
         """
-        beta = self.beta    # Present bias parameter
-        delta = self.delta  # Discount factor
-        R = self.model.interest_rate   # Gross interest rate
+        # --- Print Initial State ---
+        if self.step_count == 0:
+            print(f"Agent {self.unique_id} ({self.profile_name}): First Step - Beta: {self.beta}, Delta: {self.delta}, R_star: {self.R_star}")
         
-        lower_bound_k_next = max(self.borrowing_limit, 0) # Min k_next (savings)
-        upper_bound_k_next = R * k # Max k_next (savings can't exceed current resources times interest)
+        print(f"Agent {self.unique_id} ({self.profile_name}): Step start. Wealth: {self.wealth:.4f}, Previous Savings: {self.previous_savings}")
+        print(f"Agent {self.unique_id}: R = {self.model.interest_rate}, R_star = {self.R_star}")
 
-        max_objective_function_val = -np.inf # We are maximizing utility directly here
-        
-        # Default optimal_k_next: clip current k to feasible bounds.
-        # This ensures consumption is non-negative if k is positive.
-        # If R*k itself is less than lower_bound_k_next, this will choose lower_bound_k_next.
-        optimal_k_next = np.clip(k, lower_bound_k_next, upper_bound_k_next) 
-
-        # Iterate over all possible k_next choices from the grid
-        for k_next_candidate in wealth_grid_for_opt:
-            # Ensure the candidate for k_next is within feasible saving limits
-            if k_next_candidate < lower_bound_k_next or k_next_candidate > upper_bound_k_next:
-                continue
-
-            consumption = R * k - k_next_candidate
-            
-            if consumption <= 1e-9: # Penalize non-positive consumption
-                current_objective_function_val = -np.inf 
+        # --- Retrieve VFI Solution (First Step Only) ---
+        if not self.value_function_calculated:
+            if self.profile_name in self.model.vfi_cache:
+                self.V, self.g = self.model.vfi_cache[self.profile_name]
+                self.value_function_calculated = True
+                print(f"Agent {self.unique_id} ({self.profile_name}): Cache HIT. Retrieved V and g functions.")
             else:
-                # Value of V_old_for_opt at k_next_candidate for the objective function
-                # Note: k_next_candidate is already a grid point, but if wealth_grid_for_opt
-                # is not perfectly aligned or if k_next_candidate was somehow not from the grid,
-                # interpolation is safer. Since it *is* from the grid, direct indexing
-                # could be faster if you find the index, but interp is robust.
-                # For future_utility_component, it's beta * (delta * V_old(k_next_candidate))
-                # as this is what the agent maximizes.
-                val_at_k_next_candidate = np.interp(k_next_candidate, wealth_grid_for_opt, V_old_for_opt)
-                future_utility_for_objective = delta * val_at_k_next_candidate
+                raise Exception(f"CRITICAL ERROR: VFI for profile '{self.profile_name}' not found in cache for Agent {self.unique_id}.")
 
-                current_objective_function_val = self.utility(consumption) + beta * future_utility_for_objective
-            
-            if current_objective_function_val > max_objective_function_val:
-                max_objective_function_val = current_objective_function_val
-                optimal_k_next = k_next_candidate
-
-        # If no valid choice was found (e.g., all consumptions were non-positive),
-        # max_objective_function_val might still be -np.inf.
-        # In this case, optimal_k_next might still be its default.
-        # We need to ensure optimal_k_next leads to non-negative consumption for calculating final utility.
-        if max_objective_function_val == -np.inf:
-            # Fallback: save as much as possible up to R*k, or hit borrowing limit, ensuring c>=0
-            optimal_k_next = np.clip(R * k, lower_bound_k_next, upper_bound_k_next) 
-            # Re-calculate max_objective_function_val for this fallback optimal_k_next
-            final_consumption_check = R * k - optimal_k_next
-            final_consumption_check = max(final_consumption_check, 1e-9) # Ensure positive for utility calc
-
-            val_at_optimal_k_next_fallback = np.interp(optimal_k_next, wealth_grid_for_opt, V_old_for_opt)
-            future_utility_for_objective_fallback = delta * val_at_optimal_k_next_fallback
-            max_objective_function_val = self.utility(final_consumption_check) + beta * future_utility_for_objective_fallback
-
-
-        # Continuation value for the Bellman equation is V_old_for_opt(optimal_k_next)
-        continuation_value_for_bellman = np.interp(optimal_k_next, wealth_grid_for_opt, V_old_for_opt)
+        # --- Agent's Decision (Every Step) ---
+        wealth_grid = self.model.wealth_grid
+        wealth_index = np.argmin(np.abs(wealth_grid - self.wealth))
+        optimal_savings = self.g[wealth_index]
+        self.savings = np.clip(optimal_savings, self.borrowing_limit, self.model.interest_rate * self.wealth)
         
-        # The value returned as "final_total_utility" should be the maximized objective value
-        final_total_utility_debug = max_objective_function_val
+        wealth_with_interest = self.model.interest_rate * self.wealth
+        consumption = max(wealth_with_interest - self.savings, 1e-9)
+        percentage_consumed = (consumption / (wealth_with_interest + 1e-9)) * 100
+        percentage_saved = (self.savings / (wealth_with_interest + 1e-9)) * 100
 
-        return continuation_value_for_bellman, optimal_k_next, final_total_utility_debug
+        # --- Print Detailed Decision Logs ---
+        print(f"Agent {self.unique_id}: Step {self.step_count}")
+        print(f"  Previous Wealth: {self.previous_wealth:.4f}")
+        print(f"  Optimal Savings (from policy): {optimal_savings:.4f}")
+        print(f"  Calculated Savings (after clipping): {self.savings:.4f}")
+        print(f"  Consumption: {consumption:.4f}")
+        
+        # --- State Updates ---
+        self.previous_wealth = self.wealth
+        self.wealth = self.savings
+        self.previous_savings = self.savings
+
+        # --- Print Final Summary ---
+        print(f"Agent {self.unique_id}: Step end. | Total resources: {wealth_with_interest:.2f}, Consumption: {consumption:.2f}, Savings: {self.savings:.2f}, Wealth end of step: {self.wealth:.2f}")
+        print(f"Percentage consumed: {percentage_consumed:.2f}%, percentage saved: {percentage_saved:.2f}%\n")
+
+        # --- History Tracking ---
+        self.consumption_history.append(consumption)
+        self.wealth_history.append(self.wealth)
+        self.utility_history.append(self.utility(consumption))
+        self.step_count += 1
 
 
 def compute_gini(model):
@@ -375,6 +188,85 @@ def get_wealth_quantile(model, quantile):
     if not agent_wealths:
         return 0
     return np.quantile(agent_wealths, q=quantile)
+
+def calculate_vfi_for_profile(profile_params, model_params):
+    """
+    Performs the complete, sequential Value Function Iteration for a given agent profile.
+    This is a standalone function designed to be run in parallel.
+    """
+    # Unpack parameters
+    profile_name = profile_params['name']
+    beta = profile_params['beta']
+    delta = profile_params['delta']
+    max_iterations = profile_params['vfi_iterations']
+    
+    R = model_params['interest_rate']
+    sigma = model_params['sigma']
+    wealth_grid = model_params['wealth_grid']
+    borrowing_limit = model_params['borrowing_limit']
+    
+    # R_star is useful for context in the logs
+    R_star = 1 + (1 - delta) / (beta * delta)
+    print(f"VFI ({profile_name}): Starting computation. Beta: {beta}, Delta: {delta}, R: {R}, R_star: {R_star}")
+    
+    start_time = time.time()
+
+    # --- Utility and Optimization functions (nested for encapsulation) ---
+    def utility(consumption):
+        consumption = max(consumption, 1e-9)
+        if sigma == 1: return np.log(consumption)
+        else: return consumption**(1 - sigma) / (1 - sigma)
+
+    def optimize_savings(k, V_old, grid):
+        max_obj_val = -np.inf
+        optimal_k_next = np.clip(k, borrowing_limit, R * k)
+        for k_next_candidate in grid:
+            if not (borrowing_limit <= k_next_candidate <= R * k): continue
+            consumption = R * k - k_next_candidate
+            if consumption > 1e-9:
+                val_at_k_next = np.interp(k_next_candidate, grid, V_old)
+                obj_val = utility(consumption) + beta * delta * val_at_k_next
+                if obj_val > max_obj_val:
+                    max_obj_val = obj_val
+                    optimal_k_next = k_next_candidate
+        continuation_val = np.interp(optimal_k_next, grid, V_old)
+        return continuation_val, optimal_k_next
+
+    # --- Main VFI Loop (Sequential) ---
+    V = np.zeros_like(wealth_grid)
+    g = np.zeros_like(wealth_grid)
+    tolerance = 1e-6
+    
+    for i in range(max_iterations):
+        V_old = V.copy()
+        g_old_this_iter = g.copy()
+        
+        for j, k_val in enumerate(wealth_grid):
+            continuation, next_k = optimize_savings(k_val, V_old, wealth_grid)
+            V[j] = utility(max(R * k_val - next_k, 1e-9)) + delta * continuation
+            g[j] = next_k
+        
+        # --- Add printing logic inside the loop ---
+        diff_V = np.max(np.abs(V - V_old))
+        diff_g_array = np.abs(g - g_old_this_iter)
+        diff_g = np.max(diff_g_array)
+        k_val_max_diff_g = np.nan
+        if diff_g > 0:
+            k_val_max_diff_g = wealth_grid[np.argmax(diff_g_array)]
+
+        if (i + 1) % 20 == 0:
+            print(f"VFI ({profile_name}): Iteration {i+1}/{max_iterations}, Diff_V: {diff_V:.4e}, Diff_g: {diff_g:.4e} (at k={k_val_max_diff_g:.2f})")
+
+        if diff_V < tolerance:
+            total_time = time.time() - start_time
+            print(f"VFI ({profile_name}): CONVERGED after {i+1} iterations.")
+            print(f"VFI ({profile_name}): Total value iteration took {total_time:.4f} seconds.")
+            return (profile_name, V, g)
+            
+    total_time = time.time() - start_time
+    print(f"VFI ({profile_name}): DID NOT CONVERGE after {max_iterations} iterations.")
+    print(f"VFI ({profile_name}): Total value iteration took {total_time:.4f} seconds.")
+    return (profile_name, V, g)
 
 class SavingModel(Model):
     """
@@ -409,75 +301,70 @@ class SavingModel(Model):
     """
     
     def __init__(self, population_composition, interest_rate, sigma, wealth_dist, num_wealth_points=100):
-        """
-        Initializes the SavingModel.
-
-        Args:
-            agent_profile (dict): A dictionary containing the parameters
-                ('beta' and 'delta') for the agent's hyperbolic discounting
-                preferences.
-            interest_rate (float): The constant gross interest rate.
-            sigma (float): The coefficient of relative risk aversion.
-            wealth_dist (list): The distribution of initial wealth.
-            num_wealth_points (int): Number of points in the wealth grid.
-        """
-
-        super().__init__()  # Initialize the Model superclass
+        super().__init__()
 
         # --- Model Parameters ---
         self.num_agents = sum(population_composition.values())
-        self.interest_rate = interest_rate  # Constant gross interest rate
-        self.sigma = sigma  # inv. of intertemporal substitution
-        self.max_wealth = 1000001  # Upper bound for the wealth grid
-        self.borrowing_limit = 0    # Lower bound for wealth (no borrowing)
-        self.wealth_dist = wealth_dist  # Initial wealth distribution
-        self.num_wealth_points = num_wealth_points
-        min_grid_wealth = 1e-6 
-
+        self.interest_rate = interest_rate
+        self.sigma = sigma
+        self.max_wealth = 1000001
+        self.borrowing_limit = 0
+        self.wealth_dist = wealth_dist
+        self.wealth_grid = np.geomspace(1e-6, self.max_wealth, num_wealth_points)
+        
         # --- Mesa Components ---
-        # Grid is not strictly necessary for a single agent but is kept for
-        # compatibility with potential future multi-agent extensions.
-        self.grid = MultiGrid(10, 10, True)  # A 10x10 grid
-        self.schedule = RandomActivation(self)  # Random activation scheduler
-
+        self.grid = MultiGrid(10, 10, True)
+        self.schedule = RandomActivation(self)
+        
+        print("--- Starting VFI Pre-computation for all profiles ---")
+        start_time = time.time()
+        
+        # --- Parallel VFI Pre-computation ---
         self.vfi_cache = {}
+        unique_profiles_to_compute = population_composition.keys()
+        
+        # Prepare arguments for the parallel function
+        model_params = {
+            'interest_rate': self.interest_rate, 'sigma': self.sigma,
+            'wealth_grid': self.wealth_grid, 'borrowing_limit': self.borrowing_limit
+        }
+        
+        profile_params_list = []
+        global agent_profiles
+        for name in unique_profiles_to_compute:
+            params = agent_profiles[name].copy()
+            params['name'] = name
+            profile_params_list.append(params)
 
-        if self.max_wealth <= min_grid_wealth:
-            raise ValueError(f"max_wealth ({self.max_wealth}) must be greater than min_grid_wealth ({min_grid_wealth})")
+        # Run the VFI for all profiles in parallel [cite: 32]
+        # Each call to calculate_vfi_for_profile runs on a separate core
+        results = Parallel(n_jobs=-1, verbose=51)(
+            delayed(calculate_vfi_for_profile)(prof_params, model_params) for prof_params in profile_params_list
+        )
 
-        # --- Create the Wealth Grid ---
-        # A discrete set of wealth levels used for value function iteration.
-        self.wealth_grid = np.geomspace(min_grid_wealth, self.max_wealth, self.num_wealth_points)
-        print(f"Model Initialized with a GEOMETRICALLY SPACED wealth_grid of {self.num_wealth_points} points from {self.wealth_grid[0]:.2e} to {self.wealth_grid[-1]:.2e}.", flush=True)
+        # Pre-populate the cache with the results [cite: 37-38]
+        for profile_name, V, g in results:
+            self.vfi_cache[profile_name] = (V, g)
+        
+        end_time = time.time()
+        print(f"--- VFI Pre-computation finished in {end_time - start_time:.2f} seconds. Cache is populated. ---")
 
-
-
-        # --- Create the Agent ---
-        self.create_agents(population_composition)    # Create and add the agent
-
+        # --- Create Agents (who will now all get cache hits) ---
+        self.create_agents(population_composition)
+        
         # --- Data Collection ---
-        # Define consumption calculation carefully based on when savings are decided
-        # Consumption in step t depends on wealth at start of t (which is savings from t-1)
-        # and savings chosen in step t (which becomes wealth at start of t+1).
         def get_consumption(agent):
-            # Ensure previous_wealth is not None (can happen before first step completes fully)
-            if agent.previous_wealth is None:
-                return 0 # Or some other placeholder like np.nan
-            consumption = agent.model.interest_rate * agent.previous_wealth - agent.savings
-            return max(consumption, 1e-9) # Ensure non-negative
-
+            if agent.previous_wealth is None: return 0
+            return max(agent.model.interest_rate * agent.previous_wealth - agent.savings, 1e-9)
         def get_utility(agent):
-             consumption = get_consumption(agent)
-             # Handle cases where consumption might lead to invalid utility (e.g., log(0))
-             utility_val = agent.utility(consumption)
-             if not np.isfinite(utility_val):
-                 # print(f"Warning: Non-finite utility calculated ({utility_val}) for consumption {consumption}. Returning NaN.")
-                 return np.nan # Return NaN or 0 if utility is invalid
-             return utility_val
-
+            # Handle cases where consumption might lead to invalid utility (e.g., log(0))
+            utility_val = agent.utility(get_consumption(agent))
+            if not np.isfinite(utility_val):
+                return np.nan # Return NaN or 0 if utility is invalid
+            return utility_val
 
         self.datacollector = DataCollector(
-            model_reporters={
+             model_reporters={
                 "Average Wealth": lambda m: np.mean([agent.wealth for agent in m.schedule.agents]),
                 "Median Wealth": lambda m: np.median([agent.wealth for agent in m.schedule.agents]),
                 "Std. Dev. Wealth": lambda m: np.std([agent.wealth for agent in m.schedule.agents]),
@@ -489,18 +376,18 @@ class SavingModel(Model):
                 "Wealth_Quantile_90": lambda m: get_wealth_quantile(m, 0.90),
             },
             agent_reporters={
-                "Wealth": "wealth", # Wealth at the *end* of the step (i.e., next period's start)
-                "Savings": "savings", # Savings chosen *during* the step
-                "Consumption": get_consumption, # Consumption *during* the step
+                "Wealth": "wealth", 
+                "Savings": "savings", 
+                "Consumption": get_consumption,
                 "Total Resources": lambda a: a.previous_wealth * a.model.interest_rate if a.previous_wealth is not None else 0,
-                "R_star": "R_star",
+                "R_star": "R_star", 
                 "Interest_Rate": lambda a: a.model.interest_rate,
-                "Utility": get_utility, # Utility from consumption *during* the step
+                "Utility": get_utility, 
                 "Previous_Wealth": "previous_wealth", 
                 "Profile": "profile_name"
             }
         )
-        print("Model initialized", flush=True)
+        print("Model initialized")
 
     def create_agents(self, population_composition):
         """
@@ -581,11 +468,11 @@ class SavingModel(Model):
 
 # Define Agent Profiles
 agent_profiles = {
-    "planner": {"beta": 0.97, "delta": 0.96,"vfi_iterations": 300},  # Higher beta = less present bias, higer delta = more patient ° default = "beta": 0.8, "delta": 0.98,"vfi_iterations": 60
-    "moderate": {"beta": 0.90, "delta": 0.91, "vfi_iterations": 300},  # Base values
-    "procrastinator": {"beta": 0.73, "delta": 0.95, "vfi_iterations": 300},  # low beta = more present bias, high delta = more patient, values also future consumption
+    "planner": {"beta": 0.97, "delta": 0.96, "vfi_iterations": 300},
+    "moderate": {"beta": 0.90, "delta": 0.91, "vfi_iterations": 300},
+    "procrastinator": {"beta": 0.73, "delta": 0.95, "vfi_iterations": 300},
     "inverse procrastinator": {"beta": 0.96, "delta": 0.85, "vfi_iterations": 300},
-    "impulsive": {"beta": 0.60, "delta": 0.80, "vfi_iterations": 300},  # lower beta = more present bias, lower delta = less patient
+    "impulsive": {"beta": 0.60, "delta": 0.80, "vfi_iterations": 300},
 }
 
 # Define Economic Conditions
@@ -607,109 +494,92 @@ population_to_simulate = {
 }
 
 # Define the conditions to iterate over
+# Note: For testing, you might want to use just one rate, e.g., [1.05]
 interest_rates_to_test = [1.30]
 SIMULATION_STEPS = 24
 
-# --- 2. Setup Output Directory ---
+# --- 2. Setup Output Directories ---
 output_dir_csv = "output_csv"
 os.makedirs(output_dir_csv, exist_ok=True)
 output_dir_text = "output_text"
 os.makedirs(output_dir_text, exist_ok=True)
 log_filepath = os.path.join(output_dir_text, "simulation_run_log.txt")
 
+# This print statement will appear in your console
 print(f"Starting simulation. All detailed output will be saved to: {log_filepath}")
 
-# Use a 'with' block to handle the file and stdout redirection
-with open(log_filepath, "w") as log_file:
-    original_stdout = sys.stdout
-    sys.stdout = log_file # All subsequent 'print' statements go to the log_file
-    print("\n" + "="*50)
-    print("ALL SIMULATIONS COMPLETE...") 
+# --- 3. Run Simulation with Logging ---
 
+# This 'with' block handles the log file redirection
+with open(log_filepath, "w") as log_file:
+    # --- REDIRECT STDOUT (all print statements) TO THE LOG FILE ---
+    original_stdout = sys.stdout
+    sys.stdout = log_file
+
+    print("="*50)
+    print("SIMULATION RUN STARTED...")
+    print(f"Current Time: {time.ctime()}")
+    print("="*50 + "\n")
+
+    # Loop through each experimental condition
     for rate in interest_rates_to_test:
         print(f"\n--- Running Simulation for Interest Rate (R) = {rate} ---")
         
-        # Create a fresh model instance for this condition
+        # Create a fresh model instance. This will trigger the parallel VFI pre-computation.
         model = SavingModel(
             population_composition=population_to_simulate,
             interest_rate=rate,
             sigma=sigma,
             wealth_dist=wealth_dist,
-            num_wealth_points=300 # Size of the wealth_grid
+            num_wealth_points=300 # Using the larger wealth grid
         )
         
-        # Run the model
+        # Run the model for the specified number of steps
         for i in range(SIMULATION_STEPS):
+            print(f"\n--- MODEL STEP {i} ---")
             model.step()
             
-        print(f"--- Simulation Complete. Exporting data... ---")
+        print(f"\n--- Simulation Complete for R={rate}. Exporting data... ---")
 
-        # Retrieve data from the datacollector
+        # Retrieve and save data
         agent_data = model.datacollector.get_agent_vars_dataframe()
         model_data = model.datacollector.get_model_vars_dataframe()
-
-        print(f"DEBUG: Columns in agent_data for R={rate} are: {agent_data.columns}")
-
-        print("--- First 15 Profile Values in the DataFrame ---")
-        print(agent_data[['Profile']].head(15))
-        print("---------------------------------------------")
-
-        print("--- Exporting V and g functions for sample agents... ---")
         
-        # Create a sub-directory for this detailed data
-        output_dir_v_g = os.path.join(output_dir_csv, "v_g_functions")
-        os.makedirs(output_dir_v_g, exist_ok=True)
-
-        # Identify one agent from each profile to save their functions
-        agents_to_save = {}
-
-        for profile in population_to_simulate.keys():
-            print(f"Searching for agents with profile: '{profile}'") 
-            
-            # This is the line that is failing
-            filtered_agents = agent_data[agent_data['Profile'] == profile]
-            
-            if filtered_agents.empty:
-                print(f"  > WARNING: No agents found for profile '{profile}'. Skipping.")
-                continue # Skip to the next profile in the loop
-                
-            first_agent_of_profile = filtered_agents.index.get_level_values('AgentID')[0]
-            agents_to_save[profile] = first_agent_of_profile
-        
-        print(f"Found sample agents to save: {agents_to_save}") 
-
-        for agent in model.schedule.agents:
-            if agent.unique_id in agents_to_save.values():
-                if agent.value_function_calculated:
-                    v_g_base_filename = f"R_{rate}_agent_{agent.unique_id}_{agent.profile_name}"
-                    v_func_path = os.path.join(output_dir_v_g, f"{v_g_base_filename}_value_function.npy")
-                    g_func_path = os.path.join(output_dir_v_g, f"{v_g_base_filename}_policy_function.npy")
-                    
-                    np.save(v_func_path, agent.V)
-                    np.save(g_func_path, agent.g)
-                    print(f"  > Saved V and g for Agent {agent.unique_id} ({agent.profile_name})")
-        
-        # Define descriptive filenames
         base_filename = f"R_{rate}_pop_{len(model.schedule.agents)}agents_steps_{SIMULATION_STEPS}"
         agent_data_filepath = os.path.join(output_dir_csv, f"{base_filename}_agent_data.csv")
         model_data_filepath = os.path.join(output_dir_csv, f"{base_filename}_model_data.csv")
         
-        # Save data to CSV files
         agent_data.to_csv(agent_data_filepath)
         model_data.to_csv(model_data_filepath)
         
         print(f"Successfully saved Agent Data to: {agent_data_filepath}")
         print(f"Successfully saved Model Data to: {model_data_filepath}")
+        
+        print("--- Exporting V and g functions from cache... ---")
+        output_dir_v_g = os.path.join(output_dir_csv, "v_g_functions")
+        os.makedirs(output_dir_v_g, exist_ok=True)
+
+        # Loop through the pre-computed items in the cache
+        for profile_name, (V, g) in model.vfi_cache.items():
+            # Create descriptive filenames for each profile
+            v_g_base_filename = f"R_{rate}_{profile_name}"
+            v_func_path = os.path.join(output_dir_v_g, f"{v_g_base_filename}_value_function.npy")
+            g_func_path = os.path.join(output_dir_v_g, f"{v_g_base_filename}_policy_function.npy")
+            
+            # Save the V and g arrays to .npy files
+            np.save(v_func_path, V)
+            np.save(g_func_path, g)
+            print(f"  > Saved V and g for profile '{profile_name}'")
 
     print("\n" + "="*50)
     print("ALL SIMULATIONS COMPLETE. ALL DATA EXPORTED.")
     print(f"Output files are in the '{output_dir_csv}' directory.")
     print("="*50 + "\n")
 
-# --- Restore console output ---
+# --- RESTORE STDOUT TO THE CONSOLE ---
 sys.stdout = original_stdout
 
-# This print statement will appear in your console
-print("Process finished.")
+# These final print statements will appear in your console
+print("Process finished successfully.")
 print(f"All data saved to '{output_dir_csv}'.")
 print(f"Full simulation log saved to '{log_filepath}'.")

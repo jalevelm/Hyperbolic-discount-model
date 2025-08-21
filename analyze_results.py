@@ -1,6 +1,3 @@
-# ----------------------------------------------------------
-# --- Part 2: CORRECTED & Expanded Analysis Script ---
-# ----------------------------------------------------------
 import pandas as pd
 import matplotlib.pyplot as plt
 import os
