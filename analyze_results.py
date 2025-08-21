@@ -109,7 +109,7 @@ for model_file, agent_file in zip(model_data_files, agent_data_files):
     
     # --- Plot 3 & 4: V and g functions ---
     output_dir_v_g = os.path.join(output_dir_csv, "v_g_functions")
-    wealth_grid = np.geomspace(1e-6, 1000001, 100) #make sure its the same size as the model one
+    wealth_grid = np.geomspace(1e-6, 1000001, 300) #make sure its the same size as the model one
     rate_str = f"R_{rate}_"
     npy_files = [f for f in os.listdir(output_dir_v_g) if f.startswith(rate_str)]
     policy_files = sorted([f for f in npy_files if "policy_function" in f])

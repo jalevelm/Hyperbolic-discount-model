@@ -141,7 +141,7 @@ class SavingAgent(Agent):
                 iteration_count = 0
                 
                 outer_loop_start_time = time.time()
-
+                #--------------------------------------------------------------------------------------------------------------------------
                 for _ in range(self.max_vfi_iterations):
                     iteration_count += 1
                     V_old = V.copy()
@@ -176,7 +176,7 @@ class SavingAgent(Agent):
 
                 total_value_iteration_time = time.time() - outer_loop_start_time
                 print(f"Agent {self.unique_id}: Total value iteration took {total_value_iteration_time:.4f} seconds.", flush=True)
-                
+                #-------------------------------------------------------------------------------------------------------------------------------------------------
                 self.V = V
                 self.g = g
                 self.value_function_calculated = True
@@ -581,11 +581,11 @@ class SavingModel(Model):
 
 # Define Agent Profiles
 agent_profiles = {
-    "planner": {"beta": 0.97, "delta": 0.96,"vfi_iterations": 150},  # Higher beta = less present bias, higer delta = more patient ° default = "beta": 0.8, "delta": 0.98,"vfi_iterations": 60
-    "moderate": {"beta": 0.90, "delta": 0.91, "vfi_iterations": 150},  # Base values
-    "procrastinator": {"beta": 0.73, "delta": 0.95, "vfi_iterations": 150},  # low beta = more present bias, high delta = more patient, values also future consumption
-    "inverse procrastinator": {"beta": 0.96, "delta": 0.85, "vfi_iterations": 150},
-    "impulsive": {"beta": 0.60, "delta": 0.80, "vfi_iterations": 150},  # lower beta = more present bias, lower delta = less patient
+    "planner": {"beta": 0.97, "delta": 0.96,"vfi_iterations": 300},  # Higher beta = less present bias, higer delta = more patient ° default = "beta": 0.8, "delta": 0.98,"vfi_iterations": 60
+    "moderate": {"beta": 0.90, "delta": 0.91, "vfi_iterations": 300},  # Base values
+    "procrastinator": {"beta": 0.73, "delta": 0.95, "vfi_iterations": 300},  # low beta = more present bias, high delta = more patient, values also future consumption
+    "inverse procrastinator": {"beta": 0.96, "delta": 0.85, "vfi_iterations": 300},
+    "impulsive": {"beta": 0.60, "delta": 0.80, "vfi_iterations": 300},  # lower beta = more present bias, lower delta = less patient
 }
 
 # Define Economic Conditions
@@ -599,13 +599,15 @@ wealth_dist = [
 
 # Define the population for the experiment
 population_to_simulate = {
-    "planner": 5,
-    "moderate": 10,
-    "impulsive": 8
+    "planner": 20,
+    "moderate": 30,
+    "procrastinator": 20,
+    "inverse procrastinator": 15,
+    "impulsive": 15
 }
 
 # Define the conditions to iterate over
-interest_rates_to_test = [1.02, 1.05, 1.10, 1.30]
+interest_rates_to_test = [1.30]
 SIMULATION_STEPS = 24
 
 # --- 2. Setup Output Directory ---
@@ -633,7 +635,7 @@ with open(log_filepath, "w") as log_file:
             interest_rate=rate,
             sigma=sigma,
             wealth_dist=wealth_dist,
-            num_wealth_points=100 # Size of the wealth_grid
+            num_wealth_points=300 # Size of the wealth_grid
         )
         
         # Run the model
