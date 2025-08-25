@@ -13,6 +13,8 @@ from joblib import Parallel, delayed
 import pandas as pd
 import cProfile
 import pstats
+import math
+import networkx as nx
 
 class SavingAgent(Agent):
     """
@@ -116,6 +118,23 @@ class SavingAgent(Agent):
         else:
             return consumption**(1 - self.sigma) / (1 - self.sigma)
 
+    def get_neighbors(self):
+        """
+        Returns a list of neighboring agent objects.
+        The definition of "neighbor" depends on the grid type used.
+        """
+        if isinstance(self.model.grid, MultiGrid):
+            # --- THIS LINE IS CORRECTED ---
+            # For a grid, neighbors are in adjacent cells. moore=True includes diagonals.
+            return self.model.grid.get_neighbors(self.pos, moore=True, include_center=False)
+        elif isinstance(self.model.grid, NetworkGrid):
+            # For a network, neighbors are agents connected by an edge.
+            # The grid returns their unique_id, so we get the agent objects
+            # from the model's scheduler.
+            neighbor_ids = self.model.grid.get_neighbors(self.unique_id, include_center=False)
+            return [self.model.schedule.agents[i] for i in neighbor_ids]
+        return []
+
     def step(self):
         """
         Advances the agent by one time step, printing detailed logs of its actions.
@@ -123,6 +142,8 @@ class SavingAgent(Agent):
         # --- Print Initial State ---
         if self.step_count == 0:
             print(f"Agent {self.unique_id} ({self.profile_name}): First Step - Beta: {self.beta}, Delta: {self.delta}, R_star: {self.R_star}")
+            neighbors = self.get_neighbors()
+            print(f"Agent {self.unique_id}: Has {len(neighbors)} neighbors.")
         
         print(f"Agent {self.unique_id} ({self.profile_name}): Step start. Wealth: {self.wealth:.4f}, Previous Savings: {self.previous_savings}")
         print(f"Agent {self.unique_id}: R = {self.model.interest_rate}, R_star = {self.R_star}")
@@ -314,7 +335,8 @@ class SavingModel(Model):
             model and agent-level data during the simulation.
     """
     
-    def __init__(self, population_composition, interest_rate, sigma, wealth_dist, num_wealth_points=100):
+    def __init__(self, population_composition, interest_rate, sigma, wealth_dist, 
+             num_wealth_points=100, network='grid', network_params=None):
         super().__init__()
 
         # --- Model Parameters ---
@@ -327,7 +349,8 @@ class SavingModel(Model):
         self.wealth_grid = np.geomspace(1e-6, self.max_wealth, num_wealth_points)
         
         # --- Mesa Components ---
-        self.grid = MultiGrid(10, 10, True)
+        # --- NEW: Call network setup method ---
+        self.setup_network(network, network_params)
         self.schedule = RandomActivation(self)
         
         print("--- Starting VFI Pre-computation for all profiles ---")
@@ -409,32 +432,51 @@ class SavingModel(Model):
         )
         print("Model initialized")
 
+    def setup_network(self, network_type, params):
+        """Initializes the social network for the agents."""
+        print(f"Setting up '{network_type}' network...")
+        if network_type == 'grid':
+            # Create a spatial grid that is large enough to hold all agents
+            grid_size = math.ceil(math.sqrt(self.num_agents))
+            self.grid = MultiGrid(grid_size, grid_size, torus=True)
+            print(f"  > Created {grid_size}x{grid_size} MultiGrid.")
+        
+        elif network_type == 'watts_strogatz':
+            # Use default parameters if none are provided
+            if params is None:
+                params = {'k': 4, 'p': 0.1}
+            
+            # Create a Watts-Strogatz graph
+            # The nodes of the graph are integers from 0 to N-1
+            g = nx.watts_strogatz_graph(n=self.num_agents, 
+                                       k=params.get('k', 4), 
+                                       p=params.get('p', 0.1))
+            self.grid = NetworkGrid(g)
+            print(f"  > Created Watts-Strogatz network with n={self.num_agents}, k={params.get('k', 4)}, p={params.get('p', 0.1)}.")
+            
+        else:
+            raise ValueError(f"Unknown network type: {network_type}")
+
     def create_agents(self, population_composition):
         """
-        Creates a population of SavingAgents based on the specified composition
-        and adds them to the model's schedule.
-
-        Args:
-            population_composition (dict): A dictionary where keys are profile
-                names (str) and values are the number of agents (int) to create
-                for that profile.
+        Creates a population of SavingAgents, adds them to the schedule,
+        and places them in the network.
         """
         print("Creating agent population...")
-        # The global agent_profiles dictionary is used to get parameters for each profile name
         global agent_profiles
 
-        # Loop through the population_composition dictionary to create agents for each profile
+        # --- NEW: Explicitly manage agent IDs for network mapping ---
+        agent_id_counter = 0
         for profile_name, count in population_composition.items():
             if profile_name not in agent_profiles:
-                print(f"Warning: Profile '{profile_name}' not found in agent_profiles. Skipping.")
+                print(f"Warning: Profile '{profile_name}' not found. Skipping.")
                 continue
 
             print(f"  Creating {count} agent(s) with profile: '{profile_name}'")
-            profile_params = agent_profiles[profile_name] # Get the parameters for this profile
+            profile_params = agent_profiles[profile_name]
 
-            # Create the specified number of agents for the current profile
             for i in range(count):
-                # --- Determine Initial Wealth for each agent ---
+                # Determine initial wealth
                 rand_num = random.random()
                 cumulative_prob = 0
                 init_wealth = 0
@@ -444,13 +486,14 @@ class SavingModel(Model):
                         init_wealth = random.randint(wealth_range[0], wealth_range[1])
                         break
                 else:
-                    init_wealth = random.randint(max(1, self.wealth_dist[-1][1][0]), self.wealth_dist[-1][1][1])
+                    # Fallback for floating point precision issues
+                    init_wealth = random.randint(self.wealth_dist[-1][1][0], self.wealth_dist[-1][1][1])
 
                 agent_vfi_iterations = profile_params.get("vfi_iterations", 50)
 
-                # --- Create and Add the Agent ---
+                # --- MODIFIED: The unique_id is now our counter ---
                 agent = SavingAgent(
-                    unique_id=self.next_id(), # Mesa handles unique IDs
+                    unique_id=agent_id_counter, # Use the counter for the ID
                     model=self,
                     profile_name=profile_name,
                     beta=profile_params["beta"],
@@ -462,7 +505,19 @@ class SavingModel(Model):
                 )
                 self.schedule.add(agent)
 
-        print(f"Total agents created and added to schedule: {len(self.schedule.agents)}")
+                if isinstance(self.grid, MultiGrid):
+                    # Get a list of all empty cells
+                    empty_cells = self.grid.empties
+                    # If there are empty cells, pick one at random
+                    if empty_cells:
+                        pos = self.random.choice(list(empty_cells))
+                        # Place the agent there
+                        self.grid.place_agent(agent, pos)
+                # --------------------------------
+
+                agent_id_counter += 1
+
+        print(f"Total agents created and placed in network: {len(self.schedule.agents)}")
         
 
 
@@ -488,11 +543,11 @@ class SavingModel(Model):
 
 # Define Agent Profiles
 agent_profiles = {
-    "planner": {"beta": 0.97, "delta": 0.96, "vfi_iterations": 1000},
-    "moderate": {"beta": 0.90, "delta": 0.91, "vfi_iterations": 1000},
-    "procrastinator": {"beta": 0.78, "delta": 0.95, "vfi_iterations": 1000},
-    "inverse procrastinator": {"beta": 0.96, "delta": 0.85, "vfi_iterations": 1000},
-    "impulsive": {"beta": 0.60, "delta": 0.80, "vfi_iterations": 1000},
+    "planner": {"beta": 0.97, "delta": 0.96, "vfi_iterations": 100},
+    "moderate": {"beta": 0.90, "delta": 0.91, "vfi_iterations": 100},
+    "procrastinator": {"beta": 0.78, "delta": 0.95, "vfi_iterations": 100},
+    "inverse procrastinator": {"beta": 0.96, "delta": 0.85, "vfi_iterations": 100},
+    "impulsive": {"beta": 0.60, "delta": 0.80, "vfi_iterations": 100},
 }
 
 # Define Economic Conditions
@@ -506,17 +561,17 @@ wealth_dist = [
 
 # Define the population for the experiment
 population_to_simulate = {
-    "planner": 200,
-    "moderate": 300,
-    "procrastinator": 200,
-    "inverse procrastinator": 150,
-    "impulsive": 150
+    "planner": 20,
+    "moderate": 30,
+    "procrastinator": 20,
+    "inverse procrastinator": 15,
+    "impulsive": 15
 }
 
 # Define the conditions to iterate over
 # Note: For testing, you might want to use just one rate, e.g., [1.05]
-interest_rates_to_test = [1.02, 1.05, 1.10, 1.30]
-SIMULATION_STEPS = 60
+interest_rates_to_test = [1.10]
+SIMULATION_STEPS = 12
 
 # --- 2. Setup Output Directories ---
 output_dir_csv = "output_csv"
@@ -551,8 +606,8 @@ with open(log_filepath, "w") as log_file:
             interest_rate=rate,
             sigma=sigma,
             wealth_dist=wealth_dist,
-            num_wealth_points = 500 
-        )
+            num_wealth_points = 300 
+        )   
         
         # Run the model for the specified number of steps
         for i in range(SIMULATION_STEPS):
