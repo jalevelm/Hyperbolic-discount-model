@@ -115,7 +115,7 @@ for model_file, agent_file in zip(model_data_files, agent_data_files):
         sample_agent_ids[profile] = first_agent_id
 
     # The wealth grid needs to match the one used in the simulation
-    wealth_grid = np.geomspace(1e-6, 1000001, 300) 
+    wealth_grid = np.geomspace(1e-6, 1000001, 500) 
     
     rate_str = f"R_{rate}_"
     npy_files = [f for f in os.listdir(output_dir_v_g) if f.startswith(rate_str)]

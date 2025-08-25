@@ -488,11 +488,11 @@ class SavingModel(Model):
 
 # Define Agent Profiles
 agent_profiles = {
-    "planner": {"beta": 0.97, "delta": 0.96, "vfi_iterations": 300},
-    "moderate": {"beta": 0.90, "delta": 0.91, "vfi_iterations": 300},
-    "procrastinator": {"beta": 0.73, "delta": 0.95, "vfi_iterations": 300},
-    "inverse procrastinator": {"beta": 0.96, "delta": 0.85, "vfi_iterations": 300},
-    "impulsive": {"beta": 0.60, "delta": 0.80, "vfi_iterations": 300},
+    "planner": {"beta": 0.97, "delta": 0.96, "vfi_iterations": 1000},
+    "moderate": {"beta": 0.90, "delta": 0.91, "vfi_iterations": 1000},
+    "procrastinator": {"beta": 0.78, "delta": 0.95, "vfi_iterations": 1000},
+    "inverse procrastinator": {"beta": 0.96, "delta": 0.85, "vfi_iterations": 1000},
+    "impulsive": {"beta": 0.60, "delta": 0.80, "vfi_iterations": 1000},
 }
 
 # Define Economic Conditions
@@ -506,17 +506,17 @@ wealth_dist = [
 
 # Define the population for the experiment
 population_to_simulate = {
-    "planner": 20,
-    "moderate": 30,
-    "procrastinator": 20,
-    "inverse procrastinator": 15,
-    "impulsive": 15
+    "planner": 200,
+    "moderate": 300,
+    "procrastinator": 200,
+    "inverse procrastinator": 150,
+    "impulsive": 150
 }
 
 # Define the conditions to iterate over
 # Note: For testing, you might want to use just one rate, e.g., [1.05]
-interest_rates_to_test = [1.30]
-SIMULATION_STEPS = 24
+interest_rates_to_test = [1.02, 1.05, 1.10, 1.30]
+SIMULATION_STEPS = 60
 
 # --- 2. Setup Output Directories ---
 output_dir_csv = "output_csv"
@@ -551,7 +551,7 @@ with open(log_filepath, "w") as log_file:
             interest_rate=rate,
             sigma=sigma,
             wealth_dist=wealth_dist,
-            num_wealth_points=300 # Using the larger wealth grid
+            num_wealth_points = 500 
         )
         
         # Run the model for the specified number of steps
