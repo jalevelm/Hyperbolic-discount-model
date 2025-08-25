@@ -82,6 +82,7 @@ class SavingAgent(Agent):
         self.wealth = init_wealth   # Current wealth
         self.init_wealth = init_wealth # Initial wealth (stored for reference)
         self.borrowing_limit = borrowing_limit  # Borrowing constraint
+        self.consumption = 0
         self.savings = 0        # Initial savings (updated each step)
         self.previous_savings = None    # Savings from the previous step
         self.previous_wealth = init_wealth  # Wealth at the start of the step
@@ -160,20 +161,50 @@ class SavingAgent(Agent):
         # --- Agent's Decision (Every Step) ---
         wealth_grid = self.model.wealth_grid
         wealth_index = np.argmin(np.abs(wealth_grid - self.wealth))
-        optimal_savings = self.g[wealth_index]
+
+
+        optimal_savings_from_policy = self.g[wealth_index]
+        optimal_savings = optimal_savings_from_policy
+
+        # --- START: PEER COMPARISON LOGIC BLOCK ---
+        if self.model.social_influence_active and self.model.peer_comparison_strength > 0:
+            neighbors = self.get_neighbors()
+            if neighbors:
+                # 1. Observe neighbors' consumption from the previous step
+                neighbor_consumptions = [n.consumption for n in neighbors]
+                
+                if neighbor_consumptions:
+                    # 2. Calculate the social "signal" (average consumption)
+                    avg_neighbor_consumption = np.mean(neighbor_consumptions)
+                    
+                    # 3. Determine the agent's own ideal consumption
+                    ideal_consumption = max(self.model.interest_rate * self.wealth - optimal_savings, 1e-9)
+
+                    # 4. Blend the ideal consumption with the social signal
+                    strength = self.model.peer_comparison_strength
+                    final_consumption = ((1 - strength) * ideal_consumption) + (strength * avg_neighbor_consumption)
+
+                    # 5. The agent's new savings goal is based on this socially-adjusted consumption
+                    optimal_savings = self.model.interest_rate * self.wealth - final_consumption
+        # --- END: PEER COMPARISON LOGIC BLOCK ---
+
         self.savings = np.clip(optimal_savings, self.borrowing_limit, self.model.interest_rate * self.wealth)
         
         wealth_with_interest = self.model.interest_rate * self.wealth
-        consumption = max(wealth_with_interest - self.savings, 1e-9)
-        percentage_consumed = (consumption / (wealth_with_interest + 1e-9)) * 100
+
+
+        self.consumption = max(wealth_with_interest - self.savings, 1e-9)
+        percentage_consumed = (self.consumption / (wealth_with_interest + 1e-9)) * 100
         percentage_saved = (self.savings / (wealth_with_interest + 1e-9)) * 100
 
         # --- Print Detailed Decision Logs ---
         print(f"Agent {self.unique_id}: Step {self.step_count}")
         print(f"  Previous Wealth: {self.previous_wealth:.4f}")
-        print(f"  Optimal Savings (from policy): {optimal_savings:.4f}")
+        print(f"  Optimal Savings (from policy): {optimal_savings_from_policy:.4f}")
+        if abs(optimal_savings - optimal_savings_from_policy) > 1e-6:
+             print(f"  Socially-Adjusted Savings Goal: {optimal_savings:.4f}")
         print(f"  Calculated Savings (after clipping): {self.savings:.4f}")
-        print(f"  Consumption: {consumption:.4f}")
+        print(f"  Consumption: {self.consumption:.4f}")
         
         # --- State Updates ---
         self.previous_wealth = self.wealth
@@ -181,13 +212,13 @@ class SavingAgent(Agent):
         self.previous_savings = self.savings
 
         # --- Print Final Summary ---
-        print(f"Agent {self.unique_id}: Step end. | Total resources: {wealth_with_interest:.2f}, Consumption: {consumption:.2f}, Savings: {self.savings:.2f}, Wealth end of step: {self.wealth:.2f}")
+        print(f"Agent {self.unique_id}: Step end. | Total resources: {wealth_with_interest:.2f}, Consumption: {self.consumption:.2f}, Savings: {self.savings:.2f}, Wealth end of step: {self.wealth:.2f}")
         print(f"Percentage consumed: {percentage_consumed:.2f}%, percentage saved: {percentage_saved:.2f}%\n")
 
         # --- History Tracking ---
-        self.consumption_history.append(consumption)
+        self.consumption_history.append(self.consumption)
         self.wealth_history.append(self.wealth)
-        self.utility_history.append(self.utility(consumption))
+        self.utility_history.append(self.utility(self.consumption))
         self.step_count += 1
 
 
@@ -335,8 +366,8 @@ class SavingModel(Model):
             model and agent-level data during the simulation.
     """
     
-    def __init__(self, population_composition, interest_rate, sigma, wealth_dist, 
-             num_wealth_points=100, network='grid', network_params=None):
+    def __init__(self, population_composition, interest_rate, sigma, wealth_dist, num_wealth_points=100, network='grid', network_params=None, social_influence_active=True,
+                 peer_comparison_strength=0.1):
         super().__init__()
 
         # --- Model Parameters ---
@@ -347,9 +378,10 @@ class SavingModel(Model):
         self.borrowing_limit = 0
         self.wealth_dist = wealth_dist
         self.wealth_grid = np.geomspace(1e-6, self.max_wealth, num_wealth_points)
+        self.social_influence_active = social_influence_active
+        self.peer_comparison_strength = peer_comparison_strength
         
         # --- Mesa Components ---
-        # --- NEW: Call network setup method ---
         self.setup_network(network, network_params)
         self.schedule = RandomActivation(self)
         
