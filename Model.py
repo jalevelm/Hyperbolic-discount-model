@@ -167,7 +167,7 @@ class SavingAgent(Agent):
         optimal_savings = optimal_savings_from_policy
 
         # --- START: PEER COMPARISON LOGIC BLOCK ---
-        if self.model.social_influence_active and self.model.peer_comparison_strength > 0:
+        if self.model.peer_comparison_active and self.model.peer_comparison_strength > 0:
             neighbors = self.get_neighbors()
             if neighbors:
                 # 1. Observe neighbors' consumption from the previous step
@@ -366,8 +366,14 @@ class SavingModel(Model):
             model and agent-level data during the simulation.
     """
     
-    def __init__(self, population_composition, interest_rate, sigma, wealth_dist, num_wealth_points=100, network='grid', network_params=None, social_influence_active=True,
-                 peer_comparison_strength=0.1):
+    def __init__(self, population_composition, interest_rate, sigma, wealth_dist, 
+                 num_wealth_points=100, network='grid', network_params=None, 
+                 peer_comparison_active=True,
+                 social_norm_active=False,
+                 information_diffusion_active=False,
+                 peer_comparison_strength=0.2,
+                 social_norm_strength=0.05,
+                 information_diffusion_strength=0.05):
         super().__init__()
 
         # --- Model Parameters ---
@@ -378,8 +384,12 @@ class SavingModel(Model):
         self.borrowing_limit = 0
         self.wealth_dist = wealth_dist
         self.wealth_grid = np.geomspace(1e-6, self.max_wealth, num_wealth_points)
-        self.social_influence_active = social_influence_active
+        self.peer_comparison_active = peer_comparison_active
+        self.social_norm_active = social_norm_active
+        self.information_diffusion_active = information_diffusion_active
         self.peer_comparison_strength = peer_comparison_strength
+        self.social_norm_strength = social_norm_strength
+        self.information_diffusion_strength = information_diffusion_strength
         
         # --- Mesa Components ---
         self.setup_network(network, network_params)
