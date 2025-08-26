@@ -92,12 +92,14 @@ for model_file, agent_file in zip(model_data_files, agent_data_files):
         axes[0].plot(steps, agent_specific_data.Wealth, label=f'Agent {agent_id} ({profile})')
         axes[1].plot(steps, agent_specific_data.Consumption, label=f'Agent {agent_id} ({profile})')
         axes[2].plot(steps, agent_specific_data.Utility, label=f'Agent {agent_id} ({profile})')
-        axes[3].plot(steps, agent_specific_data.Savings, label=f'Agent {agent_id} ({profile})')
+        axes[3].plot(steps, agent_specific_data.Policy_Savings, label=f'Plan (Agent {agent_id})', linestyle='--', alpha=0.8)
+        axes[3].plot(steps, agent_specific_data.Socially_Adjusted_Goal, label=f'Intent (Agent {agent_id})', linestyle=':', alpha=0.8)
+        axes[3].plot(steps, agent_specific_data.Savings, label=f'Action (Agent {agent_id})', linestyle='-', alpha=1.0)
 
     axes[0].set_title("Wealth Over Time"); axes[0].set_ylabel("Wealth"); axes[0].legend(); axes[0].grid(True)
     axes[1].set_title("Consumption Over Time"); axes[1].set_ylabel("Consumption"); axes[1].legend(); axes[1].grid(True)
     axes[2].set_title("Utility Over Time"); axes[2].set_ylabel("Utility"); axes[2].set_xlabel("Step"); axes[2].legend(); axes[2].grid(True)
-    axes[3].set_title("Savings Over Time"); axes[3].set_ylabel("Savings"); axes[3].set_xlabel("Step"); axes[3].legend(); axes[3].grid(True)
+    axes[3].set_title("Savings: Plan vs. Intent vs. Action"); axes[3].set_ylabel("Savings"); axes[3].set_xlabel("Step"); axes[3].legend(); axes[3].grid(True)
     
     plot_path = os.path.join(output_dir_plots, f"individual_metrics_R_{rate}.png")
     plt.savefig(plot_path)

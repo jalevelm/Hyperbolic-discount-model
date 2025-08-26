@@ -84,6 +84,8 @@ class SavingAgent(Agent):
         self.borrowing_limit = borrowing_limit  # Borrowing constraint
         self.consumption = 0
         self.savings = 0        # Initial savings (updated each step)
+        self.policy_savings = 0                 
+        self.socially_adjusted_savings_goal = 0
         self.previous_savings = None    # Savings from the previous step
         self.previous_wealth = init_wealth  # Wealth at the start of the step
         self.max_vfi_iterations = iterations
@@ -187,6 +189,9 @@ class SavingAgent(Agent):
                     # 5. The agent's new savings goal is based on this socially-adjusted consumption
                     optimal_savings = self.model.interest_rate * self.wealth - final_consumption
         # --- END: PEER COMPARISON LOGIC BLOCK ---
+
+        self.policy_savings = optimal_savings_from_policy
+        self.socially_adjusted_savings_goal = optimal_savings
 
         self.savings = np.clip(optimal_savings, self.borrowing_limit, self.model.interest_rate * self.wealth)
         
@@ -463,6 +468,8 @@ class SavingModel(Model):
             agent_reporters={
                 "Wealth": "wealth", 
                 "Savings": "savings", 
+                "Policy_Savings": "policy_savings",
+                "Socially_Adjusted_Goal": "socially_adjusted_savings_goal",
                 "Consumption": get_consumption,
                 "Total Resources": lambda a: a.previous_wealth * a.model.interest_rate if a.previous_wealth is not None else 0,
                 "R_star": "R_star", 
