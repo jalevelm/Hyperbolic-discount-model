@@ -190,6 +190,23 @@ class SavingAgent(Agent):
                     optimal_savings = self.model.interest_rate * self.wealth - final_consumption
         # --- END: PEER COMPARISON LOGIC BLOCK ---
 
+        # --- START: SOCIAL NORMS LOGIC BLOCK ---
+        if self.model.social_norm_active and self.model.social_norm_strength > 0:
+            neighbors = self.get_neighbors()
+            if neighbors:
+                # 1. Observe the 'beta' parameter of neighbors to gauge the social norm
+                neighbor_betas = [n.beta for n in neighbors]
+                
+                if neighbor_betas:
+                    # 2. Calculate the prevailing norm (average beta in the neighborhood)
+                    neighborhood_beta_norm = np.mean(neighbor_betas)
+                    
+                    # 3. Adjust the agent's own beta towards the norm
+                    # This represents a slow change in the agent's core preferences 
+                    strength = self.model.social_norm_strength
+                    self.beta = ((1 - strength) * self.beta) + (strength * neighborhood_beta_norm)
+        # --- END: SOCIAL NORMS LOGIC BLOCK ---
+
         self.policy_savings = optimal_savings_from_policy
         self.socially_adjusted_savings_goal = optimal_savings
 
@@ -373,11 +390,11 @@ class SavingModel(Model):
     
     def __init__(self, population_composition, interest_rate, sigma, wealth_dist, 
                  num_wealth_points=100, network='grid', network_params=None, 
-                 peer_comparison_active=True,
-                 social_norm_active=False,
+                 peer_comparison_active=False,
+                 social_norm_active=True,
                  information_diffusion_active=False,
                  peer_comparison_strength=0.2,
-                 social_norm_strength=0.05,
+                 social_norm_strength=0.2,
                  information_diffusion_strength=0.05):
         super().__init__()
 
@@ -426,7 +443,7 @@ class SavingModel(Model):
             profile_params_list.append(params)
             
 
-        # Run the VFI for all profiles in parallel [cite: 32]
+        # Run the VFI for all profiles in parallel
         # Each call to calculate_vfi_for_profile runs on a separate core
         results = Parallel(n_jobs=-1, verbose=51)(
             delayed(calculate_vfi_for_profile)(prof_params, model_params) for prof_params in profile_params_list
@@ -476,7 +493,8 @@ class SavingModel(Model):
                 "Interest_Rate": lambda a: a.model.interest_rate,
                 "Utility": get_utility, 
                 "Previous_Wealth": "previous_wealth", 
-                "Profile": "profile_name"
+                "Profile": "profile_name",
+                "Beta": "beta"
             }
         )
         print("Model initialized")
@@ -620,7 +638,7 @@ population_to_simulate = {
 # Define the conditions to iterate over
 # Note: For testing, you might want to use just one rate, e.g., [1.05]
 interest_rates_to_test = [1.10]
-SIMULATION_STEPS = 12
+SIMULATION_STEPS = 60
 
 # --- 2. Setup Output Directories ---
 output_dir_csv = "output_csv"
@@ -655,7 +673,9 @@ with open(log_filepath, "w") as log_file:
             interest_rate=rate,
             sigma=sigma,
             wealth_dist=wealth_dist,
-            num_wealth_points = 300 
+            num_wealth_points = 300,
+            social_norm_active=True,
+            social_norm_strength=0.05 
         )   
         
         # Run the model for the specified number of steps
