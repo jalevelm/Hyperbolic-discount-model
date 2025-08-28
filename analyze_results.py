@@ -193,5 +193,36 @@ for model_file, agent_file in zip(model_data_files, agent_data_files):
         plt.close()
         print(f"  > Saved resource allocation plot: {plot_path}")
 
+    # --- Plot 6: Beta Convergence Over Time ---
+    
+    # We use the same 'agents_to_plot' dictionary from Plot 2 for consistency
+    fig, ax = plt.subplots(figsize=(12, 7))
+
+    for profile, agent_id in agents_to_plot.items():
+        # Filter the dataframe for each specific agent
+        agent_specific_data = agent_data.loc[(slice(None), agent_id), :]
+        steps = agent_specific_data.index.get_level_values('Step')
+        
+        # Plot the Beta value over the steps
+        ax.plot(steps, agent_specific_data.Beta, label=f'Agent {agent_id} ({profile})', marker='.', markersize=4)
+
+    # For context, calculate the initial average beta of the entire population
+    
+    if 1 in agent_data.index.get_level_values('Step'):
+        initial_mean_beta = agent_data.loc[1]['Beta'].mean()
+        ax.axhline(y=initial_mean_beta, color='k', linestyle='--', 
+                    label=f'Initial Mean Beta (~{initial_mean_beta:.3f})')
+
+    ax.set_title(f'Agent Beta Convergence Over Time (R = {rate})')
+    ax.set_xlabel('Step')
+    ax.set_ylabel('Beta (Present Bias Parameter)')
+    ax.legend()
+    ax.grid(True)
+    
+    plot_path = os.path.join(output_dir_plots, f"beta_convergence_R_{rate}.png")
+    plt.savefig(plot_path)
+    plt.close()
+    print(f"  > Saved beta convergence plot: {plot_path}")
+
 
 print("\n--- Analysis complete. All plots saved to 'output_plots' directory. ---")
