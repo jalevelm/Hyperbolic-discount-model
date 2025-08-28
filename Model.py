@@ -57,7 +57,7 @@ class SavingAgent(Agent):
             wealth level (savings) for each possible current wealth level.
             Initialized to None, calculated during the first step.
     """
-    def __init__(self, unique_id, model, profile_name, beta, delta, init_wealth, sigma, borrowing_limit, iterations=50):
+    def __init__(self, unique_id, model, profile_name, beta, delta, init_wealth, sigma, borrowing_limit, financial_literacy, iterations=50):
         """
         Initializes a new SavingAgent.
 
@@ -77,6 +77,7 @@ class SavingAgent(Agent):
         self.beta = beta        # Present bias
         self.delta = delta      # Discount factor
         self.sigma = sigma      # Inverse of elasticity of intertemporal substitution
+        self.financial_literacy = financial_literacy
 
         # --- Initial Conditions ---
         self.wealth = init_wealth   # Current wealth
@@ -160,6 +161,23 @@ class SavingAgent(Agent):
             else:
                 raise Exception(f"CRITICAL ERROR: VFI for profile '{self.profile_name}' not found in cache for Agent {self.unique_id}.")
 
+        # --- START: INFORMATION DIFFUSION LOGIC BLOCK ---
+        if self.model.information_diffusion_active and self.model.information_diffusion_strength > 0:
+            neighbors = self.get_neighbors()
+            if neighbors:
+                # 1. Identify neighbors with higher financial literacy
+                more_literate_neighbors = [n for n in neighbors if n.financial_literacy > self.financial_literacy]
+                
+                if more_literate_neighbors:
+                    # 2. Calculate the average literacy of this more knowledgeable group
+                    avg_smarter_literacy = np.mean([n.financial_literacy for n in more_literate_neighbors])
+                    
+                    # 3. Update the agent's own literacy, moving it towards the average
+                    #    of the more literate neighbors. The strength parameter controls the speed.
+                    learning_rate = self.model.information_diffusion_strength
+                    self.financial_literacy += learning_rate * (avg_smarter_literacy - self.financial_literacy)
+        # --- END: INFORMATION DIFFUSION LOGIC BLOCK --- 
+
         # --- Agent's Decision (Every Step) ---
         wealth_grid = self.model.wealth_grid
         wealth_index = np.argmin(np.abs(wealth_grid - self.wealth))
@@ -167,6 +185,19 @@ class SavingAgent(Agent):
 
         optimal_savings_from_policy = self.g[wealth_index]
         optimal_savings = optimal_savings_from_policy
+
+        # --- START: FINANCIAL LITERACY EFFECT BLOCK ---
+        if self.model.information_diffusion_active:
+            # 2. Get the "rational" savings plan from the planner's policy function
+            _, g_planner = self.model.vfi_cache["planner"]
+            rational_savings_goal = g_planner[wealth_index]
+            
+            # 3. Blend the agent's biased plan with the rational plan using financial_literacy as the weight
+            # An agent with literacy=1 will fully adopt the planner's goal.
+            # An agent with literacy=0 will stick to their own biased goal.
+            optimal_savings = ((1 - self.financial_literacy) * optimal_savings_from_policy) + \
+                              (self.financial_literacy * rational_savings_goal)
+        # --- END: FINANCIAL LITERACY EFFECT BLOCK --
 
         # --- START: PEER COMPARISON LOGIC BLOCK ---
         if self.model.peer_comparison_active and self.model.peer_comparison_strength > 0:
@@ -391,11 +422,11 @@ class SavingModel(Model):
     def __init__(self, population_composition, interest_rate, sigma, wealth_dist, 
                  num_wealth_points=100, network='grid', network_params=None, 
                  peer_comparison_active=False,
-                 social_norm_active=True,
+                 social_norm_active=False,
                  information_diffusion_active=False,
                  peer_comparison_strength=0.2,
                  social_norm_strength=0.2,
-                 information_diffusion_strength=0.05):
+                 information_diffusion_strength=0.2):
         super().__init__()
 
         # --- Model Parameters ---
@@ -494,7 +525,8 @@ class SavingModel(Model):
                 "Utility": get_utility, 
                 "Previous_Wealth": "previous_wealth", 
                 "Profile": "profile_name",
-                "Beta": "beta"
+                "Beta": "beta",
+                "Financial_Literacy": "financial_literacy"
             }
         )
         print("Model initialized")
@@ -553,14 +585,12 @@ class SavingModel(Model):
                         init_wealth = random.randint(wealth_range[0], wealth_range[1])
                         break
                 else:
-                    # Fallback for floating point precision issues
                     init_wealth = random.randint(self.wealth_dist[-1][1][0], self.wealth_dist[-1][1][1])
 
                 agent_vfi_iterations = profile_params.get("vfi_iterations", 50)
 
-                # --- MODIFIED: The unique_id is now our counter ---
                 agent = SavingAgent(
-                    unique_id=agent_id_counter, # Use the counter for the ID
+                    unique_id=agent_id_counter,
                     model=self,
                     profile_name=profile_name,
                     beta=profile_params["beta"],
@@ -568,6 +598,7 @@ class SavingModel(Model):
                     init_wealth=init_wealth,
                     sigma=self.sigma,
                     borrowing_limit=self.borrowing_limit,
+                    financial_literacy=profile_params["financial_literacy"],
                     iterations=agent_vfi_iterations
                 )
                 self.schedule.add(agent)
@@ -610,11 +641,11 @@ class SavingModel(Model):
 
 # Define Agent Profiles
 agent_profiles = {
-    "planner": {"beta": 0.97, "delta": 0.96, "vfi_iterations": 100},
-    "moderate": {"beta": 0.90, "delta": 0.91, "vfi_iterations": 100},
-    "procrastinator": {"beta": 0.78, "delta": 0.95, "vfi_iterations": 100},
-    "inverse procrastinator": {"beta": 0.96, "delta": 0.85, "vfi_iterations": 100},
-    "impulsive": {"beta": 0.60, "delta": 0.80, "vfi_iterations": 100},
+    "planner": {"beta": 0.97, "delta": 0.96, "vfi_iterations": 100, "financial_literacy": 0.9},
+    "moderate": {"beta": 0.90, "delta": 0.91, "vfi_iterations": 100, "financial_literacy": 0.6},
+    "procrastinator": {"beta": 0.78, "delta": 0.95, "vfi_iterations": 100, "financial_literacy": 0.3},
+    "inverse procrastinator": {"beta": 0.96, "delta": 0.85, "vfi_iterations": 100, "financial_literacy": 0.5},
+    "impulsive": {"beta": 0.60, "delta": 0.80, "vfi_iterations": 100, "financial_literacy": 0.1},
 }
 
 # Define Economic Conditions
@@ -674,8 +705,10 @@ with open(log_filepath, "w") as log_file:
             sigma=sigma,
             wealth_dist=wealth_dist,
             num_wealth_points = 300,
-            social_norm_active=True,
-            social_norm_strength=0.05 
+            social_norm_active=False,
+            social_norm_strength=0.2,
+            information_diffusion_active=False,
+            information_diffusion_strength=0.2 
         )   
         
         # Run the model for the specified number of steps

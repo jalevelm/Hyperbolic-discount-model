@@ -224,5 +224,30 @@ for model_file, agent_file in zip(model_data_files, agent_data_files):
     plt.close()
     print(f"  > Saved beta convergence plot: {plot_path}")
 
+    # --- Plot 7: Financial Literacy Evolution Over Time ---
+    
+    # We use the same 'agents_to_plot' dictionary for consistency
+    fig, ax = plt.subplots(figsize=(12, 7))
+
+    for profile, agent_id in agents_to_plot.items():
+        # Filter the dataframe for each specific agent
+        agent_specific_data = agent_data.loc[(slice(None), agent_id), :]
+        steps = agent_specific_data.index.get_level_values('Step')
+        
+        # Plot the Financial_Literacy value over the steps
+        ax.plot(steps, agent_specific_data.Financial_Literacy, label=f'Agent {agent_id} ({profile})', marker='.', markersize=4)
+
+    ax.set_title(f'Agent Financial Literacy Evolution (R = {rate})')
+    ax.set_xlabel('Step')
+    ax.set_ylabel('Financial Literacy Score')
+    ax.set_ylim(0, 1.05) # Literacy is bounded between 0 and 1
+    ax.legend()
+    ax.grid(True)
+    
+    plot_path = os.path.join(output_dir_plots, f"literacy_evolution_R_{rate}.png")
+    plt.savefig(plot_path)
+    plt.close()
+    print(f"  > Saved financial literacy evolution plot: {plot_path}")
+
 
 print("\n--- Analysis complete. All plots saved to 'output_plots' directory. ---")
