@@ -24,13 +24,19 @@ for model_file, agent_file in zip(model_data_files, agent_data_files):
     agent_data = pd.read_csv(os.path.join(output_dir_csv, agent_file), index_col=[0, 1])
     
     try:
-        rate = float(model_file.split('_')[1])
-    except:
+        parts = model_file.split('_')
+        # Find the index of 'R', which precedes the rate value
+        r_index = parts.index('R')
+        # The rate is the element immediately after 'R'
+        rate = parts[r_index + 1]
+    except (ValueError, IndexError):
         rate = 'Unknown'
 
-    # --- Plot 1: High-Level Aggregate Behavior (Now with 4 Subplots) ---
+    run_name = model_file.split('R_')[0].replace('run_', '').rstrip('_')
+
+    # --- Plot 1: High-Level Aggregate Behavior ---
     fig, axes = plt.subplots(4, 1, figsize=(12, 22), sharex=True)
-    fig.suptitle(f'Aggregate Model Behavior (R = {rate})', fontsize=16)
+    fig.suptitle(f'Aggregate Model Behavior ({run_name}, R = {rate})', fontsize=16)
 
     model_data["Average Wealth"].plot(ax=axes[0], title="Average Wealth", grid=True)
     axes[0].set_ylabel("Wealth")
@@ -45,14 +51,14 @@ for model_file, agent_file in zip(model_data_files, agent_data_files):
     axes[3].set_ylabel("Utility")
     axes[3].set_xlabel("Step")
 
-    plot_path = os.path.join(output_dir_plots, f"aggregate_metrics_R_{rate}.png")
+    plot_path = os.path.join(output_dir_plots, f"{run_name}_aggregate_metrics_R_{rate}.png")
     plt.savefig(plot_path)
     plt.close()
     print(f"  > Saved aggregate plot: {plot_path}")
 
     if "Gini_Coefficient" in model_data.columns and "Wealth_Quantile_90" in model_data.columns:
         fig, axes = plt.subplots(2, 1, figsize=(12, 14), sharex=True)
-        fig.suptitle(f'Wealth Distribution and Inequality (R = {rate})', fontsize=16)
+        fig.suptitle(f'Wealth Distribution and Inequality ({run_name}, R = {rate})', fontsize=16)
 
         # Subplot 1: Gini Coefficient
         model_data["Gini_Coefficient"].plot(ax=axes[0], title="Gini Coefficient Over Time", grid=True, color='red')
@@ -69,14 +75,14 @@ for model_file, agent_file in zip(model_data_files, agent_data_files):
         axes[1].set_title("Wealth Gap: Top 10% vs. Bottom 10%")
 
 
-        plot_path = os.path.join(output_dir_plots, f"inequality_metrics_R_{rate}.png")
+        plot_path = os.path.join(output_dir_plots, f"{run_name}_inequality_metrics_R_{rate}.png")
         plt.savefig(plot_path)
         plt.close()
         print(f"  > Saved inequality plot: {plot_path}")
 
     # --- Plot 2: "Zoom-In" on Individual Agents ---
     fig, axes = plt.subplots(4, 1, figsize=(12, 22), sharex=True)
-    fig.suptitle(f'Individual Agent Metrics (R = {rate})', fontsize=16)
+    fig.suptitle(f'Individual Agent Metrics ({run_name}, R = {rate})', fontsize=16)
 
     profiles = agent_data['Profile'].unique()
     agents_to_plot = {}
@@ -101,7 +107,7 @@ for model_file, agent_file in zip(model_data_files, agent_data_files):
     axes[2].set_title("Utility Over Time"); axes[2].set_ylabel("Utility"); axes[2].set_xlabel("Step"); axes[2].legend(); axes[2].grid(True)
     axes[3].set_title("Savings: Plan vs. Intent vs. Action"); axes[3].set_ylabel("Savings"); axes[3].set_xlabel("Step"); axes[3].legend(); axes[3].grid(True)
     
-    plot_path = os.path.join(output_dir_plots, f"individual_metrics_R_{rate}.png")
+    plot_path = os.path.join(output_dir_plots, f"{run_name}_individual_metrics_R_{rate}.png")
     plt.savefig(plot_path)
     plt.close()
     print(f"  > Saved individual agent plot: {plot_path}")
@@ -115,10 +121,8 @@ for model_file, agent_file in zip(model_data_files, agent_data_files):
     for profile in profiles:
         first_agent_id = agent_data[agent_data['Profile'] == profile].index.get_level_values('AgentID')[0]
         sample_agent_ids[profile] = first_agent_id
-
-    # The wealth grid needs to match the one used in the simulation
-    wealth_grid = np.geomspace(1e-6, 1000001, 300) 
-    
+  
+    wealth_grid = np.geomspace(1e-6, 1000001, 300) # The wealth grid needs to match the one used in the simulation
     rate_str = f"R_{rate}_"
     npy_files = [f for f in os.listdir(output_dir_v_g) if f.startswith(rate_str)]
     
@@ -182,13 +186,13 @@ for model_file, agent_file in zip(model_data_files, agent_data_files):
         # Optionally, plot the total resources line to show where the bars should reach
         ax.plot(steps, total_resources, color='black', linestyle='--', marker='o', label='Total Resources Available')
 
-        ax.set_title(f'Agent {agent_id} ({profile}) - Resource Allocation per Step (R = {rate})')
+        ax.set_title(f'Agent {agent_id} ({profile}) - Resource Allocation per Step ({run_name}, R = {rate})')
         ax.set_xlabel('Step')
         ax.set_ylabel('Amount')
         ax.legend()
         ax.grid(axis='y', linestyle='--', alpha=0.7)
 
-        plot_path = os.path.join(output_dir_plots, f"allocation_agent_{agent_id}_{profile}_R_{rate}.png")
+        plot_path = os.path.join(output_dir_plots, f"{run_name}_allocation_agent_{agent_id}_{profile}_R_{rate}.png")
         plt.savefig(plot_path)
         plt.close()
         print(f"  > Saved resource allocation plot: {plot_path}")
@@ -213,13 +217,13 @@ for model_file, agent_file in zip(model_data_files, agent_data_files):
         ax.axhline(y=initial_mean_beta, color='k', linestyle='--', 
                     label=f'Initial Mean Beta (~{initial_mean_beta:.3f})')
 
-    ax.set_title(f'Agent Beta Convergence Over Time (R = {rate})')
+    ax.set_title(f'Agent Beta Convergence Over Time ({run_name}, R = {rate})')
     ax.set_xlabel('Step')
     ax.set_ylabel('Beta (Present Bias Parameter)')
     ax.legend()
     ax.grid(True)
     
-    plot_path = os.path.join(output_dir_plots, f"beta_convergence_R_{rate}.png")
+    plot_path = os.path.join(output_dir_plots, f"{run_name}_beta_convergence_R_{rate}.png")
     plt.savefig(plot_path)
     plt.close()
     print(f"  > Saved beta convergence plot: {plot_path}")
@@ -237,14 +241,14 @@ for model_file, agent_file in zip(model_data_files, agent_data_files):
         # Plot the Financial_Literacy value over the steps
         ax.plot(steps, agent_specific_data.Financial_Literacy, label=f'Agent {agent_id} ({profile})', marker='.', markersize=4)
 
-    ax.set_title(f'Agent Financial Literacy Evolution (R = {rate})')
+    ax.set_title(f'Agent Financial Literacy Evolution ({run_name}, R = {rate})')
     ax.set_xlabel('Step')
     ax.set_ylabel('Financial Literacy Score')
     ax.set_ylim(0, 1.05) # Literacy is bounded between 0 and 1
     ax.legend()
     ax.grid(True)
     
-    plot_path = os.path.join(output_dir_plots, f"literacy_evolution_R_{rate}.png")
+    plot_path = os.path.join(output_dir_plots, f"{run_name}_literacy_evolution_R_{rate}.png")
     plt.savefig(plot_path)
     plt.close()
     print(f"  > Saved financial literacy evolution plot: {plot_path}")

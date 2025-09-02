@@ -670,6 +670,25 @@ population_to_simulate = {
 # Note: For testing, you might want to use just one rate, e.g., [1.05]
 interest_rates_to_test = [1.10]
 SIMULATION_STEPS = 60
+NUM_WEALTH_POINTS = 300
+
+experiments = {
+    "baseline": {
+        "peer_comparison_active": False, "social_norm_active": False, "information_diffusion_active": False
+    },
+    "peer_comparison_only": {
+        "peer_comparison_active": True, "social_norm_active": False, "information_diffusion_active": False
+    },
+    "social_norms_only": {
+        "peer_comparison_active": False, "social_norm_active": True, "information_diffusion_active": False
+    },
+    "info_diffusion_only": {
+        "peer_comparison_active": False, "social_norm_active": False, "information_diffusion_active": True
+    },
+    "all_interactions": {
+        "peer_comparison_active": True, "social_norm_active": True, "information_diffusion_active": True
+    }
+}
 
 # --- 2. Setup Output Directories ---
 output_dir_csv = "output_csv"
@@ -696,57 +715,56 @@ with open(log_filepath, "w") as log_file:
 
     # Loop through each experimental condition
     for rate in interest_rates_to_test:
-        print(f"\n--- Running Simulation for Interest Rate (R) = {rate} ---")
+        for run_name, settings in experiments.items():
+            print(f"\n{'='*20} RUNNING EXPERIMENT: '{run_name}' | Interest Rate (R) = {rate} {'='*20}")
         
-        # Create a fresh model instance. This will trigger the parallel VFI pre-computation.
-        model = SavingModel(
-            population_composition=population_to_simulate,
-            interest_rate=rate,
-            sigma=sigma,
-            wealth_dist=wealth_dist,
-            num_wealth_points = 300,
-            social_norm_active=False,
-            social_norm_strength=0.2,
-            information_diffusion_active=False,
-            information_diffusion_strength=0.2 
-        )   
-        
-        # Run the model for the specified number of steps
-        for i in range(SIMULATION_STEPS):
-            print(f"\n--- MODEL STEP {i} ---")
-            model.step()
+            # Create a fresh model instance. This will trigger the parallel VFI pre-computation.
+            model = SavingModel(
+                population_composition=population_to_simulate,
+                interest_rate=rate,
+                sigma=sigma,
+                wealth_dist=wealth_dist,
+                num_wealth_points=NUM_WEALTH_POINTS,
+                peer_comparison_active=settings["peer_comparison_active"],
+                social_norm_active=settings["social_norm_active"],
+                information_diffusion_active=settings["information_diffusion_active"],
+                social_norm_strength=0.2,
+                peer_comparison_strength=0.2,
+                information_diffusion_strength=0.2 
+            )   
             
-        print(f"\n--- Simulation Complete for R={rate}. Exporting data... ---")
+            # Run the model for the specified number of steps
+            for i in range(SIMULATION_STEPS):
+                print(f"\n--- MODEL STEP {i} ---")
+                model.step()
+                
+            print(f"\n--- Simulation Complete for R={rate}. Exporting data... ---")
 
-        # Retrieve and save data
-        agent_data = model.datacollector.get_agent_vars_dataframe()
-        model_data = model.datacollector.get_model_vars_dataframe()
-        
-        base_filename = f"R_{rate}_pop_{len(model.schedule.agents)}agents_steps_{SIMULATION_STEPS}"
-        agent_data_filepath = os.path.join(output_dir_csv, f"{base_filename}_agent_data.csv")
-        model_data_filepath = os.path.join(output_dir_csv, f"{base_filename}_model_data.csv")
-        
-        agent_data.to_csv(agent_data_filepath)
-        model_data.to_csv(model_data_filepath)
-        
-        print(f"Successfully saved Agent Data to: {agent_data_filepath}")
-        print(f"Successfully saved Model Data to: {model_data_filepath}")
-        
-        print("--- Exporting V and g functions from cache... ---")
-        output_dir_v_g = os.path.join(output_dir_csv, "v_g_functions")
-        os.makedirs(output_dir_v_g, exist_ok=True)
-
-        # Loop through the pre-computed items in the cache
-        for profile_name, (V, g) in model.vfi_cache.items():
-            # Create descriptive filenames for each profile
-            v_g_base_filename = f"R_{rate}_{profile_name}"
-            v_func_path = os.path.join(output_dir_v_g, f"{v_g_base_filename}_value_function.npy")
-            g_func_path = os.path.join(output_dir_v_g, f"{v_g_base_filename}_policy_function.npy")
+            # Retrieve and save data
+            agent_data = model.datacollector.get_agent_vars_dataframe()
+            model_data = model.datacollector.get_model_vars_dataframe()
             
-            # Save the V and g arrays to .npy files
-            np.save(v_func_path, V)
-            np.save(g_func_path, g)
-            print(f"  > Saved V and g for profile '{profile_name}'")
+            base_filename = f"run_{run_name}_R_{rate}_pop_{len(model.schedule.agents)}agents_steps_{SIMULATION_STEPS}"
+            agent_data_filepath = os.path.join(output_dir_csv, f"{base_filename}_agent_data.csv")
+            model_data_filepath = os.path.join(output_dir_csv, f"{base_filename}_model_data.csv")
+            
+            agent_data.to_csv(agent_data_filepath)
+            model_data.to_csv(model_data_filepath)
+            
+            print(f"Successfully saved Agent Data to: {agent_data_filepath}")
+            print(f"Successfully saved Model Data to: {model_data_filepath}")
+            
+            if run_name == "baseline": # Only save V/g on the first run to avoid redundancy
+                print("--- Exporting V and g functions from cache... ---")
+                output_dir_v_g = os.path.join(output_dir_csv, "v_g_functions")
+                os.makedirs(output_dir_v_g, exist_ok=True)
+                for profile_name, (V, g) in model.vfi_cache.items():
+                    v_g_base_filename = f"R_{rate}_{profile_name}"
+                    v_func_path = os.path.join(output_dir_v_g, f"{v_g_base_filename}_value_function.npy")
+                    g_func_path = os.path.join(output_dir_v_g, f"{v_g_base_filename}_policy_function.npy")
+                    np.save(v_func_path, V)
+                    np.save(g_func_path, g)
+                    print(f"  > Saved V and g for profile '{profile_name}'")
 
     print("\n" + "="*50)
     print("ALL SIMULATIONS COMPLETE. ALL DATA EXPORTED.")
