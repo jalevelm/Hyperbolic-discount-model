@@ -73,6 +73,7 @@ class SavingAgent(Agent):
         super().__init__(unique_id, model)  # Call the superclass constructor
 
         self.profile_name = profile_name
+        self.original_profile = profile_name
         # --- Agent Preferences and State ---
         self.beta = beta        # Present bias
         self.delta = delta      # Discount factor
@@ -153,13 +154,10 @@ class SavingAgent(Agent):
         print(f"Agent {self.unique_id}: R = {self.model.interest_rate}, R_star = {self.R_star}")
 
         # --- Retrieve VFI Solution (First Step Only) ---
-        if not self.value_function_calculated:
-            if self.profile_name in self.model.vfi_cache:
-                self.V, self.g = self.model.vfi_cache[self.profile_name]
-                self.value_function_calculated = True
-                print(f"Agent {self.unique_id} ({self.profile_name}): Cache HIT. Retrieved V and g functions.")
-            else:
-                raise Exception(f"CRITICAL ERROR: VFI for profile '{self.profile_name}' not found in cache for Agent {self.unique_id}.")
+        try:
+            self.V, self.g = self.model.vfi_cache[self.profile_name]
+        except KeyError:
+            raise Exception(f"CRITICAL ERROR: VFI for profile '{self.profile_name}' not found in cache for Agent {self.unique_id}.")
 
         # --- START: INFORMATION DIFFUSION LOGIC BLOCK ---
         if self.model.information_diffusion_active and self.model.information_diffusion_strength > 0:
@@ -424,9 +422,10 @@ class SavingModel(Model):
                  peer_comparison_active=False,
                  social_norm_active=False,
                  information_diffusion_active=False,
-                 peer_comparison_strength=0.2,
-                 social_norm_strength=0.2,
-                 information_diffusion_strength=0.2):
+                 peer_comparison_strength=0.05,
+                 social_norm_strength=0.05,
+                 information_diffusion_strength=0.05,
+                 vfi_recalculation_interval=10):
         super().__init__()
 
         # --- Model Parameters ---
@@ -443,6 +442,7 @@ class SavingModel(Model):
         self.peer_comparison_strength = peer_comparison_strength
         self.social_norm_strength = social_norm_strength
         self.information_diffusion_strength = information_diffusion_strength
+        self.vfi_recalculation_interval = vfi_recalculation_interval
         
         # --- Mesa Components ---
         self.setup_network(network, network_params)
@@ -525,6 +525,7 @@ class SavingModel(Model):
                 "Utility": get_utility, 
                 "Previous_Wealth": "previous_wealth", 
                 "Profile": "profile_name",
+                "Original_Profile": "original_profile",
                 "Beta": "beta",
                 "Financial_Literacy": "financial_literacy"
             }
@@ -616,17 +617,78 @@ class SavingModel(Model):
                 agent_id_counter += 1
 
         print(f"Total agents created and placed in network: {len(self.schedule.agents)}")
-        
 
+
+    def _recalculate_vfi_for_changed_agents(self):
+        """
+        Identifies agents whose preferences (beta) have changed, calculates new VFI
+        solutions for the new unique preference profiles, and updates the cache.
+        """
+        print(f"\n--- Checking for VFI recalculation at step {self.schedule.steps} ---")
+        
+        # Use a set to find unique new profiles that need to be computed
+        profiles_to_compute = set()
+        
+        # First, update agent profile names based on their current beta
+        for agent in self.schedule.agents:
+            # Create a new, unique profile name based on the agent's current preferences
+            # Using 4 decimal places for beta is a good balance of precision and grouping
+            new_profile_name = f"dynamic_beta_{agent.beta:.4f}_delta_{agent.delta:.4f}"
+            
+            # If this new profile doesn't exist in our cache, we need to compute it
+            if new_profile_name not in self.vfi_cache:
+                # Add the necessary parameters to our set for computation
+                profiles_to_compute.add((new_profile_name, agent.beta, agent.delta))
+            
+            # Assign the new profile name to the agent. They will use it in their next step.
+            agent.profile_name = new_profile_name
+
+        if not profiles_to_compute:
+            print("No new agent profiles to compute. All preferences are covered by the cache.")
+            return
+
+        print(f"Found {len(profiles_to_compute)} new unique agent profiles to calculate.")
+        
+        # --- Prepare and run the parallel VFI, just like in __init__ ---
+        vfi_log_dir = os.path.join(output_dir_text, "vfi_logs")
+        model_params = {
+            'interest_rate': self.interest_rate, 'sigma': self.sigma,
+            'wealth_grid': self.wealth_grid, 'borrowing_limit': self.borrowing_limit
+        }
+        
+        profile_params_list = []
+        global agent_profiles
+        for name, beta, delta in profiles_to_compute:
+            # Add this new dynamic profile to the global dictionary for tracking
+            agent_profiles[name] = {"beta": beta, "delta": delta, "vfi_iterations": 100, "financial_literacy": 0} # Literacy can be a default
+            
+            params = agent_profiles[name].copy()
+            params['name'] = name
+            log_filename = f"R_{self.interest_rate}_{name}_step_{self.schedule.steps}_vfi_log.txt"
+            params['log_path'] = os.path.join(vfi_log_dir, log_filename)
+            profile_params_list.append(params)
+
+        start_time = time.time()
+        results = Parallel(n_jobs=-1, verbose=51)(
+            delayed(calculate_vfi_for_profile)(prof_params, model_params) for prof_params in profile_params_list
+        )
+
+        # Update the cache with the new results
+        for profile_name, V, g in results:
+            self.vfi_cache[profile_name] = (V, g)
+        
+        end_time = time.time()
+        print(f"--- On-the-fly VFI finished in {end_time - start_time:.2f} seconds. Cache updated. ---")
+        
 
     def step(self):
         """
         Advances the model by one time step.
-
-        This involves:
-        1. Collecting data from the current state.
-        2. Advancing the agent (which performs its saving/consumption decision).
         """
+        if self.social_norm_active and self.schedule.steps > 0 and \
+           self.schedule.steps % self.vfi_recalculation_interval == 0:
+            self._recalculate_vfi_for_changed_agents()
+
         print("Model step start", flush=True)  # Debug print
         self.datacollector.collect(self)    # Collect data
         self.schedule.step()    # Advance the agent (and scheduler)
@@ -649,7 +711,7 @@ agent_profiles = {
 }
 
 # Define Economic Conditions
-sigma = 0.4387
+sigma = 1
 wealth_dist = [
     (0.4152, (0, 9999)),
     (0.4772, (10000, 99999)),
@@ -659,11 +721,11 @@ wealth_dist = [
 
 # Define the population for the experiment
 population_to_simulate = {
-    "planner": 20,
-    "moderate": 30,
-    "procrastinator": 20,
-    "inverse procrastinator": 15,
-    "impulsive": 15
+    "planner": 2,
+    "moderate": 3,
+    "procrastinator": 2,
+    "inverse procrastinator": 1,
+    "impulsive": 1
 }
 
 # Define the conditions to iterate over
@@ -689,6 +751,8 @@ experiments = {
         "peer_comparison_active": True, "social_norm_active": True, "information_diffusion_active": True
     }
 }
+
+experiments_to_run = ["baseline", "social_norms_only"]
 
 # --- 2. Setup Output Directories ---
 output_dir_csv = "output_csv"
@@ -716,6 +780,9 @@ with open(log_filepath, "w") as log_file:
     # Loop through each experimental condition
     for rate in interest_rates_to_test:
         for run_name, settings in experiments.items():
+            if run_name not in experiments_to_run:
+                print(f"\n--- SKIPPING EXPERIMENT: '{run_name}' ---")
+                continue
             print(f"\n{'='*20} RUNNING EXPERIMENT: '{run_name}' | Interest Rate (R) = {rate} {'='*20}")
         
             # Create a fresh model instance. This will trigger the parallel VFI pre-computation.
@@ -730,7 +797,8 @@ with open(log_filepath, "w") as log_file:
                 information_diffusion_active=settings["information_diffusion_active"],
                 social_norm_strength=0.2,
                 peer_comparison_strength=0.2,
-                information_diffusion_strength=0.2 
+                information_diffusion_strength=0.2,
+                vfi_recalculation_interval=10 
             )   
             
             # Run the model for the specified number of steps

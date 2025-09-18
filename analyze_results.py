@@ -80,32 +80,42 @@ for model_file, agent_file in zip(model_data_files, agent_data_files):
         plt.close()
         print(f"  > Saved inequality plot: {plot_path}")
 
+    agents_to_plot = {}
+
+    if 'Original_Profile' in agent_data.columns:
+        original_profiles = agent_data['Original_Profile'].unique()
+        for profile in original_profiles:
+            # Find the first agent ID that belongs to this original cohort
+            agent_id = agent_data[agent_data['Original_Profile'] == profile].index.get_level_values('AgentID')[0]
+            agents_to_plot[profile] = agent_id
+    else:
+        print("Warning: 'Original_Profile' column not found. Individual plots may be incorrect.")
+        # Fallback to old, broken behavior if the data is old.
+        profiles = agent_data['Profile'].unique()
+        for profile in profiles:
+            agent_id = agent_data[agent_data['Profile'] == profile].index.get_level_values('AgentID')[0]
+            agents_to_plot[profile] = agent_id
+
     # --- Plot 2: "Zoom-In" on Individual Agents ---
     fig, axes = plt.subplots(4, 1, figsize=(12, 22), sharex=True)
     fig.suptitle(f'Individual Agent Metrics ({run_name}, R = {rate})', fontsize=16)
-
-    profiles = agent_data['Profile'].unique()
-    agents_to_plot = {}
-    for profile in profiles:
-        
-        agent_id = agent_data[agent_data['Profile'] == profile].index.get_level_values('AgentID')[0]
-        agents_to_plot[profile] = agent_id
 
     for profile, agent_id in agents_to_plot.items():
         agent_specific_data = agent_data.loc[(slice(None), agent_id), :]
         steps = agent_specific_data.index.get_level_values('Step')
         
-        axes[0].plot(steps, agent_specific_data.Wealth, label=f'Agent {agent_id} ({profile})')
-        axes[1].plot(steps, agent_specific_data.Consumption, label=f'Agent {agent_id} ({profile})')
-        axes[2].plot(steps, agent_specific_data.Utility, label=f'Agent {agent_id} ({profile})')
-        axes[3].plot(steps, agent_specific_data.Policy_Savings, label=f'Plan (Agent {agent_id})', linestyle='--', alpha=0.8)
-        axes[3].plot(steps, agent_specific_data.Socially_Adjusted_Goal, label=f'Intent (Agent {agent_id})', linestyle=':', alpha=0.8)
-        axes[3].plot(steps, agent_specific_data.Savings, label=f'Action (Agent {agent_id})', linestyle='-', alpha=1.0)
+        label_prefix = f'Agent {agent_id} ({profile})'
+        axes[0].plot(steps, agent_specific_data.Wealth, label=label_prefix)
+        axes[1].plot(steps, agent_specific_data.Consumption, label=label_prefix)
+        axes[2].plot(steps, agent_specific_data.Utility, label=label_prefix)
+        axes[3].plot(steps, agent_specific_data.Policy_Savings, label=f'Plan ({label_prefix})', linestyle='--', alpha=0.8)
+        axes[3].plot(steps, agent_specific_data.Socially_Adjusted_Goal, label=f'Intent ({label_prefix})', linestyle=':', alpha=0.8)
+        axes[3].plot(steps, agent_specific_data.Savings, label=f'Action ({label_prefix})', linestyle='-', alpha=1.0)
 
-    axes[0].set_title("Wealth Over Time"); axes[0].set_ylabel("Wealth"); axes[0].legend(); axes[0].grid(True)
-    axes[1].set_title("Consumption Over Time"); axes[1].set_ylabel("Consumption"); axes[1].legend(); axes[1].grid(True)
-    axes[2].set_title("Utility Over Time"); axes[2].set_ylabel("Utility"); axes[2].set_xlabel("Step"); axes[2].legend(); axes[2].grid(True)
-    axes[3].set_title("Savings: Plan vs. Intent vs. Action"); axes[3].set_ylabel("Savings"); axes[3].set_xlabel("Step"); axes[3].legend(); axes[3].grid(True)
+    axes[0].set_title("Wealth Over Time"); axes[0].legend(); axes[0].grid(True)
+    axes[1].set_title("Consumption Over Time"); axes[1].legend(); axes[1].grid(True)
+    axes[2].set_title("Utility Over Time"); axes[2].legend(); axes[2].grid(True)
+    axes[3].set_title("Savings: Plan vs. Intent vs. Action"); axes[3].legend(); axes[3].grid(True)
     
     plot_path = os.path.join(output_dir_plots, f"{run_name}_individual_metrics_R_{rate}.png")
     plt.savefig(plot_path)
@@ -115,51 +125,52 @@ for model_file, agent_file in zip(model_data_files, agent_data_files):
     # --- Plot 3 & 4: V and g functions ---
     output_dir_v_g = os.path.join(output_dir_csv, "v_g_functions")
     
-    # Find a sample agent ID for each profile to display in the legend
-    profiles = agent_data['Profile'].unique()
-    sample_agent_ids = {}
-    for profile in profiles:
-        first_agent_id = agent_data[agent_data['Profile'] == profile].index.get_level_values('AgentID')[0]
-        sample_agent_ids[profile] = first_agent_id
-  
-    wealth_grid = np.geomspace(1e-6, 1000001, 300) # The wealth grid needs to match the one used in the simulation
-    rate_str = f"R_{rate}_"
-    npy_files = [f for f in os.listdir(output_dir_v_g) if f.startswith(rate_str)]
-    
-    policy_files = sorted([f for f in npy_files if "policy_function" in f])
-    if policy_files:
-        plt.figure(figsize=(12, 7))
-        for g_file in policy_files:
-            g_func = np.load(os.path.join(output_dir_v_g, g_file))
-            # --- Corrected Label Parsing ---
-            parts = g_file.split('_') # e.g., ['R', '1.3', 'planner', 'policy', 'function.npy']
-            profile = parts[2]
-            agent_id = sample_agent_ids.get(profile, 'N/A') # Get a sample ID for the legend
-            label = f'Agent {agent_id} ({profile})'
-            plt.plot(wealth_grid, g_func, label=label)
+    original_static_profiles = ['planner', 'moderate', 'procrastinator', 'inverse procrastinator', 'impulsive']
+    wealth_grid = np.geomspace(1e-6, 1000001, 300)
 
+    # Plot Policy Functions
+    plt.figure(figsize=(12, 7))
+    found_policy_files = False
+    for profile in original_static_profiles:
+        filename = f"R_{rate}_{profile}_policy_function.npy"
+        filepath = os.path.join(output_dir_v_g, filename)
+        if os.path.exists(filepath):
+            found_policy_files = True
+            g_func = np.load(filepath)
+            agent_id = agents_to_plot.get(profile, 'N/A')
+            plt.plot(wealth_grid, g_func, label=f'Agent {agent_id} ({profile})')
+
+    if found_policy_files:
         plt.plot(wealth_grid, wealth_grid, 'k--', label='k\' = k (No Change)', alpha=0.7)
-        plt.title(f'Agent Policy Functions g(k) (R = {rate})')
-        plt.xlabel('Current Wealth (k)'); plt.ylabel("Next Period's Wealth / Savings (k')")
+        plt.title(f'Agent Policy Functions g(k) (R = {rate})'); plt.xlabel("Current Wealth (k)"); plt.ylabel("Next Period's Wealth / Savings (k')")
         plt.legend(); plt.grid(True)
         plt.savefig(os.path.join(output_dir_plots, f"policy_functions_R_{rate}.png")); plt.close()
         print(f"  > Saved policy function plot.")
 
-    value_files = sorted([f for f in npy_files if "value_function" in f])
-    if value_files:
-        plt.figure(figsize=(12, 7))
-        for v_file in value_files:
-            v_func = np.load(os.path.join(output_dir_v_g, v_file))
-            # --- Corrected Label Parsing ---
-            parts = v_file.split('_') # e.g., ['R', '1.3', 'planner', 'value', 'function.npy']
-            profile = parts[2]
-            agent_id = sample_agent_ids.get(profile, 'N/A') # Get a sample ID for the legend
+
+    plt.figure(figsize=(12, 7))
+    found_value_files = False # Flag to check if we actually plot anything
+
+    for profile in original_static_profiles:
+        filename = f"R_{rate}_{profile}_value_function.npy"
+        filepath = os.path.join(output_dir_v_g, filename)
+            
+        if os.path.exists(filepath):
+            found_value_files = True
+            v_func = np.load(filepath)
+            agent_id = agents_to_plot.get(profile, 'N/A')
             label = f'Agent {agent_id} ({profile})'
             plt.plot(wealth_grid, v_func, label=label)
 
-        plt.title(f'Agent Value Functions V(k) (R = {rate})'); plt.xlabel('Current Wealth (k)'); plt.ylabel('Value V(k)')
-        plt.legend(); plt.grid(True)
-        plt.savefig(os.path.join(output_dir_plots, f"value_functions_R_{rate}.png")); plt.close()
+    if found_value_files:
+        plt.title(f'Agent Value Functions V(k) (R = {rate})')
+        plt.xlabel('Current Wealth (k)')
+        plt.ylabel('Value V(k)')
+        plt.legend()
+        plt.grid(True)          
+        plot_path = os.path.join(output_dir_plots, f"value_functions_R_{rate}.png")
+        plt.savefig(plot_path)
+        plt.close()
         print(f"  > Saved value function plot.")
 
     # --- Plot 5: Individual Agent Resource Allocation (Stacked Bar Chart) ---
