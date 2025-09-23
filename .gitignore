@@ -1,0 +1,15 @@
+# Python virtual environment
+venv/
+.venv/
+
+# Python cache files
+__pycache__/
+*.pyc
+
+# Environment variables
+.env
+
+#model output files 
+output_csv/
+output_text/
+output_plots/
