@@ -1,268 +1,320 @@
 import pandas as pd
 import matplotlib.pyplot as plt
+import seaborn as sns
 import os
 import numpy as np
+import re
+from scipy import stats
 
-# --- 1. Setup ---
-output_dir_csv = "output_csv"
-output_dir_plots = "output_plots"
-os.makedirs(output_dir_plots, exist_ok=True)
+# =============================================================================
+# --- 1. SETUP & CONFIGURATION ---
+# =============================================================================
+# --- Directories ---
+OUTPUT_DIR_CSV = "output_csv"
+OUTPUT_DIR_PLOTS = "output_plots"
+V_G_DIR = os.path.join(OUTPUT_DIR_CSV, "v_g_functions")
+os.makedirs(OUTPUT_DIR_PLOTS, exist_ok=True)
 
-all_files = os.listdir(output_dir_csv)
-agent_data_files = sorted([f for f in all_files if "agent_data" in f])
-model_data_files = sorted([f for f in all_files if "model_data" in f])
+# --- Constants from your experimental design ---
+NUM_REPLICATIONS = 30
+SIMULATION_STEPS = 200
+NUM_WEALTH_POINTS = 1000
 
-print(f"Found {len(agent_data_files)} agent data files and {len(model_data_files)} model data files.")
+# --- Plotting Style ---
+sns.set_theme(style="whitegrid")
+palette = sns.color_palette("viridis", 5) # Define a consistent color palette
 
-# --- 2. Generate Plots for Each Experimental Run ---
+# =============================================================================
+# --- 2. DATA LOADING AND AGGREGATION ---
+# =============================================================================
+def load_and_aggregate_data(csv_dir):
+    """
+    Loads all CSV files, parses metadata from filenames, and aggregates them
+    into two master DataFrames for model and agent data.
+    """
+    all_model_files = [f for f in os.listdir(csv_dir) if "model_data" in f]
+    all_agent_files = [f for f in os.listdir(csv_dir) if "agent_data" in f]
 
-for model_file, agent_file in zip(model_data_files, agent_data_files):
-    print(f"\n--- Processing: {model_file} ---")
+    model_df_list = []
+    agent_df_list = []
 
-    # --- Load the Data ---
-    model_data = pd.read_csv(os.path.join(output_dir_csv, model_file), index_col=0)
-    agent_data = pd.read_csv(os.path.join(output_dir_csv, agent_file), index_col=[0, 1])
-    
-    try:
-        parts = model_file.split('_')
-        # Find the index of 'R', which precedes the rate value
-        r_index = parts.index('R')
-        # The rate is the element immediately after 'R'
-        rate = parts[r_index + 1]
-    except (ValueError, IndexError):
-        rate = 'Unknown'
+    # Regex to parse filenames like: run_baseline_R_1.05_rep_1_...
+    # It captures the experiment name, interest rate, and replication number.
+    pattern = re.compile(r"run_([a-zA-Z_]+)_R_(\d+\.\d+)_rep_(\d+)")
 
-    run_name = model_file.split('R_')[0].replace('run_', '').rstrip('_')
+    print("--- Loading and parsing model data files... ---")
+    for f in all_model_files:
+        match = pattern.search(f)
+        if match:
+            run_name, rate, rep = match.groups()
+            df = pd.read_csv(os.path.join(csv_dir, f))
+            df = df.rename(columns={'Unnamed: 0': 'Step'})
+            df['Experiment'] = run_name.rstrip('_') # Clean up trailing underscores
+            df['Rate'] = float(rate)
+            df['Replication'] = int(rep)
+            model_df_list.append(df)
 
-    # --- Plot 1: High-Level Aggregate Behavior ---
-    fig, axes = plt.subplots(4, 1, figsize=(12, 22), sharex=True)
-    fig.suptitle(f'Aggregate Model Behavior ({run_name}, R = {rate})', fontsize=16)
+    print("--- Loading and parsing agent data files... ---")
+    for f in all_agent_files:
+        match = pattern.search(f)
+        if match:
+            run_name, rate, rep = match.groups()
+            df = pd.read_csv(os.path.join(csv_dir, f))
+            df = df.rename(columns={'Unnamed: 0': 'Step'})
+            df['Experiment'] = run_name.rstrip('_')
+            df['Rate'] = float(rate)
+            df['Replication'] = int(rep)
+            agent_df_list.append(df)
 
-    model_data["Average Wealth"].plot(ax=axes[0], title="Average Wealth", grid=True)
-    axes[0].set_ylabel("Wealth")
+    if not model_df_list or not agent_df_list:
+        raise FileNotFoundError("No valid data files found. Check your CSV output and filenames.")
 
-    model_data["Average Consumption"].plot(ax=axes[1], title="Average Consumption", grid=True)
-    axes[1].set_ylabel("Consumption")
-    
-    model_data["Average Savings"].plot(ax=axes[2], title="Average Savings", grid=True)
-    axes[2].set_ylabel("Savings")
+    # Concatenate all individual dataframes into two large ones
+    aggregated_model_data = pd.concat(model_df_list, ignore_index=True)
+    aggregated_agent_data = pd.concat(agent_df_list, ignore_index=True)
 
-    model_data["Average Utility"].plot(ax=axes[3], title="Average Utility", grid=True)
-    axes[3].set_ylabel("Utility")
-    axes[3].set_xlabel("Step")
+    print(f"Successfully loaded {len(aggregated_model_data)} model data rows and {len(aggregated_agent_data)} agent data rows.")
+    return aggregated_model_data, aggregated_agent_data
 
-    plot_path = os.path.join(output_dir_plots, f"{run_name}_aggregate_metrics_R_{rate}.png")
-    plt.savefig(plot_path)
-    plt.close()
-    print(f"  > Saved aggregate plot: {plot_path}")
+# =============================================================================
+# --- 3. ANALYSIS & PLOTTING FUNCTIONS ---
+# =============================================================================
 
-    if "Gini_Coefficient" in model_data.columns and "Wealth_Quantile_90" in model_data.columns:
-        fig, axes = plt.subplots(2, 1, figsize=(12, 14), sharex=True)
-        fig.suptitle(f'Wealth Distribution and Inequality ({run_name}, R = {rate})', fontsize=16)
+### --- PHASE 1: SINGLE AGENT VALIDATION --- ###
+def plot_phase1_validation(v_g_dir, num_wealth_points):
+    """
+    Generates plots for the V and g functions to validate the model's
+    theoretical foundation (Cao & Werning, 2018). 
+    """
+    print("\n--- Generating Phase 1: VFI Validation Plots ---")
+    agent_profiles = {
+        "planner": {"beta": 0.97, "delta": 0.96}, "moderate": {"beta": 0.90, "delta": 0.91},
+        "procrastinator": {"beta": 0.78, "delta": 0.95}, "inverse procrastinator": {"beta": 0.96, "delta": 0.85},
+        "impulsive": {"beta": 0.60, "delta": 0.80}
+    }
+    interest_rates = [1.05, 1.12]
+    wealth_grid = np.geomspace(1e-6, 1000001, num_wealth_points)
 
-        # Subplot 1: Gini Coefficient
-        model_data["Gini_Coefficient"].plot(ax=axes[0], title="Gini Coefficient Over Time", grid=True, color='red')
-        axes[0].set_ylabel("Gini Coefficient (0 = Equality)")
-        axes[0].set_ylim(0, 1) # Gini is always between 0 and 1
+    for rate in interest_rates:
+        ## --- Plot 1: Policy Functions (g) on a LOG-LOG scale  ---
+        plt.figure(figsize=(14, 8))
+        for name, params in agent_profiles.items():
+            filepath = os.path.join(v_g_dir, f"R_{rate}_{name}_policy_function.npy")
+            if os.path.exists(filepath):
+                g_func = np.load(filepath)
+                R_star = 1 + (1 - params['delta']) / (params['beta'] * params['delta'])
+                plt.plot(wealth_grid, g_func, label=f'{name.title()} (R* ≈ {R_star:.2f})')
 
-        # Subplot 2: Wealth Quantiles
-        model_data["Wealth_Quantile_10"].plot(ax=axes[1], title="Wealth Quantiles", grid=True, label='10th Percentile (Bottom 10%)')
-        model_data["Wealth_Quantile_90"].plot(ax=axes[1], label='90th Percentile (Top 10%)')
-        axes[1].set_ylabel("Wealth Level")
-        axes[1].set_xlabel("Step")
-        axes[1].legend()
-        axes[1].set_yscale('log') # Use a log scale if the wealth gap is very large
-        axes[1].set_title("Wealth Gap: Top 10% vs. Bottom 10%")
-
-
-        plot_path = os.path.join(output_dir_plots, f"{run_name}_inequality_metrics_R_{rate}.png")
-        plt.savefig(plot_path)
-        plt.close()
-        print(f"  > Saved inequality plot: {plot_path}")
-
-    agents_to_plot = {}
-
-    if 'Original_Profile' in agent_data.columns:
-        original_profiles = agent_data['Original_Profile'].unique()
-        for profile in original_profiles:
-            # Find the first agent ID that belongs to this original cohort
-            agent_id = agent_data[agent_data['Original_Profile'] == profile].index.get_level_values('AgentID')[0]
-            agents_to_plot[profile] = agent_id
-    else:
-        print("Warning: 'Original_Profile' column not found. Individual plots may be incorrect.")
-        # Fallback to old, broken behavior if the data is old.
-        profiles = agent_data['Profile'].unique()
-        for profile in profiles:
-            agent_id = agent_data[agent_data['Profile'] == profile].index.get_level_values('AgentID')[0]
-            agents_to_plot[profile] = agent_id
-
-    # --- Plot 2: "Zoom-In" on Individual Agents ---
-    fig, axes = plt.subplots(4, 1, figsize=(12, 22), sharex=True)
-    fig.suptitle(f'Individual Agent Metrics ({run_name}, R = {rate})', fontsize=16)
-
-    for profile, agent_id in agents_to_plot.items():
-        agent_specific_data = agent_data.loc[(slice(None), agent_id), :]
-        steps = agent_specific_data.index.get_level_values('Step')
-        
-        label_prefix = f'Agent {agent_id} ({profile})'
-        axes[0].plot(steps, agent_specific_data.Wealth, label=label_prefix)
-        axes[1].plot(steps, agent_specific_data.Consumption, label=label_prefix)
-        axes[2].plot(steps, agent_specific_data.Utility, label=label_prefix)
-        axes[3].plot(steps, agent_specific_data.Policy_Savings, label=f'Plan ({label_prefix})', linestyle='--', alpha=0.8)
-        axes[3].plot(steps, agent_specific_data.Socially_Adjusted_Goal, label=f'Intent ({label_prefix})', linestyle=':', alpha=0.8)
-        axes[3].plot(steps, agent_specific_data.Savings, label=f'Action ({label_prefix})', linestyle='-', alpha=1.0)
-
-    axes[0].set_title("Wealth Over Time"); axes[0].legend(); axes[0].grid(True)
-    axes[1].set_title("Consumption Over Time"); axes[1].legend(); axes[1].grid(True)
-    axes[2].set_title("Utility Over Time"); axes[2].legend(); axes[2].grid(True)
-    axes[3].set_title("Savings: Plan vs. Intent vs. Action"); axes[3].legend(); axes[3].grid(True)
-    
-    plot_path = os.path.join(output_dir_plots, f"{run_name}_individual_metrics_R_{rate}.png")
-    plt.savefig(plot_path)
-    plt.close()
-    print(f"  > Saved individual agent plot: {plot_path}")
-    
-    # --- Plot 3 & 4: V and g functions ---
-    output_dir_v_g = os.path.join(output_dir_csv, "v_g_functions")
-    
-    original_static_profiles = ['planner', 'moderate', 'procrastinator', 'inverse procrastinator', 'impulsive']
-    wealth_grid = np.geomspace(1e-6, 1000001, 300)
-
-    # Plot Policy Functions
-    plt.figure(figsize=(12, 7))
-    found_policy_files = False
-    for profile in original_static_profiles:
-        filename = f"R_{rate}_{profile}_policy_function.npy"
-        filepath = os.path.join(output_dir_v_g, filename)
-        if os.path.exists(filepath):
-            found_policy_files = True
-            g_func = np.load(filepath)
-            agent_id = agents_to_plot.get(profile, 'N/A')
-            plt.plot(wealth_grid, g_func, label=f'Agent {agent_id} ({profile})')
-
-    if found_policy_files:
-        plt.plot(wealth_grid, wealth_grid, 'k--', label='k\' = k (No Change)', alpha=0.7)
-        plt.title(f'Agent Policy Functions g(k) (R = {rate})'); plt.xlabel("Current Wealth (k)"); plt.ylabel("Next Period's Wealth / Savings (k')")
-        plt.legend(); plt.grid(True)
-        plt.savefig(os.path.join(output_dir_plots, f"policy_functions_R_{rate}.png")); plt.close()
-        print(f"  > Saved policy function plot.")
-
-
-    plt.figure(figsize=(12, 7))
-    found_value_files = False # Flag to check if we actually plot anything
-
-    for profile in original_static_profiles:
-        filename = f"R_{rate}_{profile}_value_function.npy"
-        filepath = os.path.join(output_dir_v_g, filename)
-            
-        if os.path.exists(filepath):
-            found_value_files = True
-            v_func = np.load(filepath)
-            agent_id = agents_to_plot.get(profile, 'N/A')
-            label = f'Agent {agent_id} ({profile})'
-            plt.plot(wealth_grid, v_func, label=label)
-
-    if found_value_files:
-        plt.title(f'Agent Value Functions V(k) (R = {rate})')
-        plt.xlabel('Current Wealth (k)')
-        plt.ylabel('Value V(k)')
+        plt.plot(wealth_grid, wealth_grid, 'k--', label="k' = k (Zero Net Saving)", alpha=0.6)
+        plt.title(f'Policy Functions g(k) for R = {rate}', fontsize=16)
+        plt.xlabel("Current Wealth (k)", fontsize=12)
+        plt.ylabel("Next Period's Wealth (k')", fontsize=12)
+        plt.xscale('log')
+        plt.yscale('log')
         plt.legend()
-        plt.grid(True)          
-        plot_path = os.path.join(output_dir_plots, f"value_functions_R_{rate}.png")
-        plt.savefig(plot_path)
+        plt.grid(True, which="both", ls="--")
+        plt.savefig(os.path.join(OUTPUT_DIR_PLOTS, f"PHASE1_policy_functions_log_R_{rate}.png"))
         plt.close()
-        print(f"  > Saved value function plot.")
+        print(f"  > Saved LOG-SCALE policy function plot for R={rate}")
 
-    # --- Plot 5: Individual Agent Resource Allocation (Stacked Bar Chart) ---
-    
-    # We use the same 'agents_to_plot' dictionary from Plot 2
-    for profile, agent_id in agents_to_plot.items():
-        fig, ax = plt.subplots(figsize=(12, 7))
+        # --- Plot 2: Policy Functions (g) on a LINEAR scale ---
+        plt.figure(figsize=(14, 8))
+        for name, params in agent_profiles.items():
+            filepath = os.path.join(v_g_dir, f"R_{rate}_{name}_policy_function.npy")
+            if os.path.exists(filepath):
+                g_func = np.load(filepath)
+                plt.plot(wealth_grid, g_func, label=f'{name.title()}')
         
-        # Filter the dataframe for this specific agent
-        agent_specific_data = agent_data.loc[(slice(None), agent_id), :].reset_index()
-
-        # We need to exclude the initial state at Step 0 for this plot, as no decision was made yet
-        plot_data = agent_specific_data[agent_specific_data['Step'] > 0]
-        
-        steps = plot_data['Step']
-        consumption = plot_data['Consumption']
-        savings = plot_data['Savings']
-        total_resources = plot_data['Total Resources']
-
-        # Create the stacked bar chart
-        ax.bar(steps, consumption, label='Consumption', color='skyblue')
-        ax.bar(steps, savings, bottom=consumption, label='Savings (Next Period Wealth)', color='salmon')
-
-        # Optionally, plot the total resources line to show where the bars should reach
-        ax.plot(steps, total_resources, color='black', linestyle='--', marker='o', label='Total Resources Available')
-
-        ax.set_title(f'Agent {agent_id} ({profile}) - Resource Allocation per Step ({run_name}, R = {rate})')
-        ax.set_xlabel('Step')
-        ax.set_ylabel('Amount')
-        ax.legend()
-        ax.grid(axis='y', linestyle='--', alpha=0.7)
-
-        plot_path = os.path.join(output_dir_plots, f"{run_name}_allocation_agent_{agent_id}_{profile}_R_{rate}.png")
-        plt.savefig(plot_path)
+        plt.plot(wealth_grid, wealth_grid, 'k--', label="k' = k (Zero Net Saving)", alpha=0.6)
+        plt.title(f'Policy Functions g(k) for R = {rate} (Linear Scale, Zoomed)', fontsize=16)
+        plt.xlabel("Current Wealth (k)", fontsize=12)
+        plt.ylabel("Next Period's Wealth (k')", fontsize=12)
+        plt.xlim(0, 500) # Zoom in on the behavior of lower-wealth agents
+        plt.ylim(0, 500)
+        plt.legend()
+        plt.grid(True)
+        plt.savefig(os.path.join(OUTPUT_DIR_PLOTS, f"PHASE1_policy_functions_linear_R_{rate}.png"))
         plt.close()
-        print(f"  > Saved resource allocation plot: {plot_path}")
+        print(f"  > Saved LINEAR-SCALE policy function plot for R={rate}")
 
-    # --- Plot 6: Beta Convergence Over Time ---
-    
-    # We use the same 'agents_to_plot' dictionary from Plot 2 for consistency
-    fig, ax = plt.subplots(figsize=(12, 7))
-
-    for profile, agent_id in agents_to_plot.items():
-        # Filter the dataframe for each specific agent
-        agent_specific_data = agent_data.loc[(slice(None), agent_id), :]
-        steps = agent_specific_data.index.get_level_values('Step')
+        # --- Plot 3: Value Functions (V) on a LOG-X scale ---
+        plt.figure(figsize=(14, 8))
+        for name, params in agent_profiles.items():
+            filepath = os.path.join(v_g_dir, f"R_{rate}_{name}_value_function.npy")
+            if os.path.exists(filepath):
+                V_func = np.load(filepath)
+                plt.plot(wealth_grid, V_func, label=f'{name.title()}')
         
-        # Plot the Beta value over the steps
-        ax.plot(steps, agent_specific_data.Beta, label=f'Agent {agent_id} ({profile})', marker='.', markersize=4)
+        plt.title(f'Value Functions V(k) for R = {rate} (Log-X Scale)', fontsize=16)
+        plt.xlabel("Current Wealth (k)", fontsize=12)
+        plt.ylabel("Lifetime Utility V(k)", fontsize=12)
+        plt.xscale('log')
+        plt.legend()
+        plt.grid(True, which="both", ls="--")
+        plt.savefig(os.path.join(OUTPUT_DIR_PLOTS, f"PHASE1_value_functions_log_R_{rate}.png"))
+        plt.close()
+        print(f"  > Saved LOG-X SCALE value function plot for R={rate}")
 
-    # For context, calculate the initial average beta of the entire population
-    
-    if 1 in agent_data.index.get_level_values('Step'):
-        initial_mean_beta = agent_data.loc[1]['Beta'].mean()
-        ax.axhline(y=initial_mean_beta, color='k', linestyle='--', 
-                    label=f'Initial Mean Beta (~{initial_mean_beta:.3f})')
-
-    ax.set_title(f'Agent Beta Convergence Over Time ({run_name}, R = {rate})')
-    ax.set_xlabel('Step')
-    ax.set_ylabel('Beta (Present Bias Parameter)')
-    ax.legend()
-    ax.grid(True)
-    
-    plot_path = os.path.join(output_dir_plots, f"{run_name}_beta_convergence_R_{rate}.png")
-    plt.savefig(plot_path)
-    plt.close()
-    print(f"  > Saved beta convergence plot: {plot_path}")
-
-    # --- Plot 7: Financial Literacy Evolution Over Time ---
-    
-    # We use the same 'agents_to_plot' dictionary for consistency
-    fig, ax = plt.subplots(figsize=(12, 7))
-
-    for profile, agent_id in agents_to_plot.items():
-        # Filter the dataframe for each specific agent
-        agent_specific_data = agent_data.loc[(slice(None), agent_id), :]
-        steps = agent_specific_data.index.get_level_values('Step')
+        # --- Plot 4: Value Functions (V) on a LINEAR scale (Zoomed In) ---
+        plt.figure(figsize=(14, 8))
+        for name, params in agent_profiles.items():
+            filepath = os.path.join(v_g_dir, f"R_{rate}_{name}_value_function.npy")
+            if os.path.exists(filepath):
+                V_func = np.load(filepath)
+                plt.plot(wealth_grid, V_func, label=f'{name.title()}')
         
-        # Plot the Financial_Literacy value over the steps
-        ax.plot(steps, agent_specific_data.Financial_Literacy, label=f'Agent {agent_id} ({profile})', marker='.', markersize=4)
+        plt.title(f'Value Functions V(k) for R = {rate} (Linear Scale)', fontsize=16)
+        plt.xlabel("Current Wealth (k)", fontsize=12)
+        plt.ylabel("Lifetime Utility V(k)", fontsize=12)
+        plt.xlim(0, 500) # Zoom in on the behavior of lower-wealth agents
+        plt.legend()
+        plt.grid(True)
+        plt.savefig(os.path.join(OUTPUT_DIR_PLOTS, f"PHASE1_value_functions_linear_R_{rate}.png"))
+        plt.close()
+        print(f"  > Saved LINEAR-SCALE value function plot for R={rate}")
 
-    ax.set_title(f'Agent Financial Literacy Evolution ({run_name}, R = {rate})')
-    ax.set_xlabel('Step')
-    ax.set_ylabel('Financial Literacy Score')
-    ax.set_ylim(0, 1.05) # Literacy is bounded between 0 and 1
-    ax.legend()
-    ax.grid(True)
-    
-    plot_path = os.path.join(output_dir_plots, f"{run_name}_literacy_evolution_R_{rate}.png")
-    plt.savefig(plot_path)
+### --- PHASE 2 & 3: COMPARATIVE ANALYSIS --- ###
+def plot_time_series_comparison(data, metric, rate):
+    """
+    Plots the mean and 95% confidence interval for a given metric over time,
+    comparing all experimental conditions.
+    """
+    plt.figure(figsize=(14, 8))
+    sns.lineplot(data=data[data['Rate'] == rate], x='Step', y=metric, hue='Experiment', palette='viridis')
+    plt.title(f'{metric.replace("_", " ")} Over Time (R = {rate})', fontsize=16)
+    plt.xlabel('Simulation Step', fontsize=12)
+    plt.ylabel(metric.replace("_", " "), fontsize=12)
+    plt.legend(title='Experiment')
+    plt.savefig(os.path.join(OUTPUT_DIR_PLOTS, f"PHASE2_3_TimeSeries_{metric}_R_{rate}.png"))
     plt.close()
-    print(f"  > Saved financial literacy evolution plot: {plot_path}")
+    print(f"  > Saved time-series plot for {metric} at R={rate}")
 
+def plot_final_distribution(data, metric, rate):
+    """
+    Creates a box plot comparing the distribution of the final values for a
+    metric across all experimental conditions.
+    """
+    final_step_data = data[(data['Rate'] == rate) & (data['Step'] == SIMULATION_STEPS)]
+    plt.figure(figsize=(14, 8))
+    sns.boxplot(data=final_step_data, x='Experiment', y=metric, palette='viridis')
+    plt.title(f'Distribution of Final {metric.replace("_", " ")} (at Step {SIMULATION_STEPS}, R = {rate})', fontsize=16)
+    plt.xlabel('Experiment', fontsize=12)
+    plt.ylabel(f'Final {metric.replace("_", " ")}', fontsize=12)
+    plt.xticks(rotation=45, ha='right')
+    plt.tight_layout()
+    plt.savefig(os.path.join(OUTPUT_DIR_PLOTS, f"PHASE2_3_FinalDist_{metric}_R_{rate}.png"))
+    plt.close()
+    print(f"  > Saved final distribution plot for {metric} at R={rate}")
 
-print("\n--- Analysis complete. All plots saved to 'output_plots' directory. ---")
+def perform_statistical_analysis(data, metric, rate):
+    """
+    Performs ANOVA and post-hoc t-tests to check for significant differences
+    between the baseline and other experiments.
+    """
+    print(f"\n--- Statistical Analysis for '{metric}' at R={rate} ---")
+    final_step_data = data[(data['Rate'] == rate) & (data['Step'] == SIMULATION_STEPS)]
+    
+    experiments = final_step_data['Experiment'].unique()
+    if len(experiments) < 2:
+        print(f"  > Found only {len(experiments)} experiment group: {experiments}. ")
+        print("  > Skipping statistical tests, as at least two groups are needed for comparison.")
+        return # Exit the function early
+
+    print(f"  > Found {len(experiments)} groups to compare: {list(experiments)}")
+    baseline_data = final_step_data[final_step_data['Experiment'] == 'baseline'][metric]
+    
+    grouped_data = [final_step_data[final_step_data['Experiment'] == exp][metric] for exp in experiments]
+
+    # 1. ANOVA - Checks if there is ANY significant difference among ANY of the groups.
+    f_val, p_val_anova = stats.f_oneway(*grouped_data)
+    print(f"One-Way ANOVA result: F-statistic = {f_val:.4f}, p-value = {p_val_anova:.4f}")
+    
+    if p_val_anova < 0.05:
+        print("ANOVA is significant. Performing post-hoc t-tests against baseline...")
+        # 2. T-Tests - Compare each social scenario to the baseline.
+        for exp in experiments:
+            if exp != 'baseline':
+                exp_data = final_step_data[final_step_data['Experiment'] == exp][metric]
+                t_stat, p_val_ttest = stats.ttest_ind(exp_data, baseline_data, equal_var=False) # Welch's t-test
+                
+                significance = "SIGNIFICANT" if p_val_ttest < 0.05 else "not significant"
+                print(f"  - T-test '{exp}' vs 'baseline': p-value = {p_val_ttest:.4f} ({significance})")
+    else:
+        print("ANOVA is not significant. No strong evidence of differences between experiment groups.")
+
+def plot_mechanism_dynamics(agent_data, rate):
+    """
+    Plots the evolution of agent-level variables that show social mechanisms at work.
+    """
+    print(f"\n--- Plotting Mechanism Dynamics for R={rate} ---")
+    data_subset = agent_data[agent_data['Rate'] == rate]
+    
+    # Plot Beta Convergence (for Social Norms)
+    if 'social_norms_only' in data_subset['Experiment'].unique():
+        plt.figure(figsize=(14, 8))
+        sns.lineplot(data=data_subset[data_subset['Experiment'].isin(['baseline', 'social_norms_only'])],
+                     x='Step', y='Beta', hue='Original_Profile', style='Experiment')
+        plt.title(f'Beta Convergence Under Social Norms (R = {rate})', fontsize=16)
+        plt.ylabel('Beta (Present Bias Parameter)')
+        plt.xlabel('Simulation Step')
+        plt.ylim(0.5, 1.0) # Zoom in on the relevant range for beta
+        plt.savefig(os.path.join(OUTPUT_DIR_PLOTS, f"PHASE3_Mechanism_Beta_R_{rate}.png"))
+        plt.close()
+        print(f"  > Saved beta convergence plot for R={rate}")
+
+    # Plot Financial Literacy Evolution (for Information Diffusion)
+    if 'info_diffusion_only' in data_subset['Experiment'].unique():
+        plt.figure(figsize=(14, 8))
+        sns.lineplot(data=data_subset[data_subset['Experiment'].isin(['baseline', 'info_diffusion_only'])],
+                     x='Step', y='Financial_Literacy', hue='Original_Profile', style='Experiment')
+        plt.title(f'Financial Literacy Evolution (R = {rate})', fontsize=16)
+        plt.ylabel('Financial Literacy Score')
+        plt.xlabel('Simulation Step')
+        plt.ylim(0, 1.05)
+        plt.savefig(os.path.join(OUTPUT_DIR_PLOTS, f"PHASE3_Mechanism_Literacy_R_{rate}.png"))
+        plt.close()
+        print(f"  > Saved financial literacy plot for R={rate}")
+        
+# =============================================================================
+# --- 4. MAIN EXECUTION BLOCK ---
+# =============================================================================
+if __name__ == "__main__":
+    # --- Load Data ---
+    model_data, agent_data = load_and_aggregate_data(OUTPUT_DIR_CSV)
+    print("\n--- Exporting fully aggregated data to CSV files... ---")
+    agg_model_path = os.path.join(OUTPUT_DIR_PLOTS, "aggregated_model_data_all_runs.csv")
+    agg_agent_path = os.path.join(OUTPUT_DIR_PLOTS, "aggregated_agent_data_all_runs.csv")
+    
+    model_data.to_csv(agg_model_path, index=False)
+    agent_data.to_csv(agg_agent_path, index=False)
+    
+    print(f"  > Saved aggregated model data to: {agg_model_path}")
+    print(f"  > Saved aggregated agent data to: {agg_agent_path}")
+
+    # --- Run Phase 1 Analysis ---
+    if os.path.exists(V_G_DIR):
+        plot_phase1_validation(V_G_DIR, NUM_WEALTH_POINTS)
+    else:
+        print("Warning: v_g_functions directory not found. Skipping Phase 1 plots.")
+
+    # --- Run Phase 2 & 3 Analysis for each interest rate ---
+    for interest_rate in model_data['Rate'].unique():
+        print(f"\n{'='*25} ANALYZING RESULTS FOR R = {interest_rate} {'='*25}")
+
+        # Define key metrics to analyze
+        model_metrics_to_plot = ["Average Wealth", "Gini_Coefficient", "Average Consumption", "Average Savings"]
+
+        for metric in model_metrics_to_plot:
+            # Generate comparative time-series plots
+            plot_time_series_comparison(model_data, metric, interest_rate)
+            
+            # Generate final distribution box plots
+            plot_final_distribution(model_data, metric, interest_rate)
+            
+            # Perform and print statistical tests
+            perform_statistical_analysis(model_data, metric, interest_rate)
+
+        # Plot the underlying social mechanisms from agent data
+        plot_mechanism_dynamics(agent_data, interest_rate)
+
+    print("\n--- Analysis complete. All plots saved to 'output_plots' directory. ---")
