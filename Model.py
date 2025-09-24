@@ -707,11 +707,11 @@ class SavingModel(Model):
 
 # Define Agent Profiles
 agent_profiles = {
-    "planner": {"beta": 0.97, "delta": 0.96, "vfi_iterations": 100, "financial_literacy": 0.9},
-    "moderate": {"beta": 0.90, "delta": 0.91, "vfi_iterations": 100, "financial_literacy": 0.6},
-    "procrastinator": {"beta": 0.78, "delta": 0.95, "vfi_iterations": 100, "financial_literacy": 0.3},
-    "inverse procrastinator": {"beta": 0.96, "delta": 0.85, "vfi_iterations": 100, "financial_literacy": 0.5},
-    "impulsive": {"beta": 0.60, "delta": 0.80, "vfi_iterations": 100, "financial_literacy": 0.1},
+    "planner": {"beta": 0.97, "delta": 0.96, "vfi_iterations": 1000, "financial_literacy": 0.9},
+    "moderate": {"beta": 0.90, "delta": 0.91, "vfi_iterations": 1000, "financial_literacy": 0.6},
+    "procrastinator": {"beta": 0.78, "delta": 0.95, "vfi_iterations": 1000, "financial_literacy": 0.3},
+    "inverse procrastinator": {"beta": 0.96, "delta": 0.85, "vfi_iterations": 1000, "financial_literacy": 0.5},
+    "impulsive": {"beta": 0.60, "delta": 0.80, "vfi_iterations": 1000, "financial_literacy": 0.1},
 }
 
 # Define Economic Conditions
@@ -725,17 +725,17 @@ wealth_dist = [
 
 # Define the population for the experiment
 population_to_simulate = {
-    "planner": 2,
-    "moderate": 3,
-    "procrastinator": 2,
+    "planner": 1,
+    "moderate": 1,
+    "procrastinator": 1,
     "inverse procrastinator": 1,
     "impulsive": 1
 }
 
 # Define the conditions to iterate over
-interest_rates_to_test = [1.10]
-SIMULATION_STEPS = 10
-NUM_WEALTH_POINTS = 100
+interest_rates_to_test = [1.05, 1.12]
+SIMULATION_STEPS = 200
+NUM_WEALTH_POINTS = 1000
 
 experiments = {
     "baseline": {
@@ -780,7 +780,7 @@ with open(log_filepath, "w") as log_file:
     print(f"Current Time: {time.ctime()}")
     print("="*50 + "\n")
 
-    NUM_REPLICATIONS = 3
+    NUM_REPLICATIONS = 30
     seeds = range(1, NUM_REPLICATIONS + 1)
 
     # Loop through each experimental condition
