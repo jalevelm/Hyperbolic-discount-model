@@ -129,7 +129,6 @@ class SavingAgent(Agent):
         The definition of "neighbor" depends on the grid type used.
         """
         if isinstance(self.model.grid, MultiGrid):
-            # --- THIS LINE IS CORRECTED ---
             # For a grid, neighbors are in adjacent cells. moore=True includes diagonals.
             return self.model.grid.get_neighbors(self.pos, moore=True, include_center=False)
         elif isinstance(self.model.grid, NetworkGrid):
@@ -426,10 +425,44 @@ class SavingModel(Model):
                  peer_comparison_strength=0.05,
                  social_norm_strength=0.05,
                  information_diffusion_strength=0.05,
-                 vfi_recalculation_interval=10):
+                 vfi_recalculation_interval=10,
+                 vfi_cache=None):
 
         super().__init__(seed=seed)
         np.random.seed(seed)    
+
+        if vfi_cache:
+            print("--- Loading pre-computed VFI cache. ---")
+            self.vfi_cache = vfi_cache
+        else:
+            print("--- No cache provided. Starting VFI Pre-computation for all profiles ---")
+            start_time = time.time()
+            self.vfi_cache = {}
+
+            unique_profiles_to_compute = population_composition.keys()
+            vfi_log_dir = os.path.join(output_dir_text, "vfi_logs")
+            os.makedirs(vfi_log_dir, exist_ok=True)
+            wealth_grid_for_vfi = np.geomspace(1e-6, 1000001, num_wealth_points)
+            model_params = {
+                'interest_rate': interest_rate, 'sigma': sigma,
+                'wealth_grid': wealth_grid_for_vfi, 
+                'borrowing_limit': 0
+            }
+            profile_params_list = []
+            global agent_profiles
+            for name in unique_profiles_to_compute:
+                params = agent_profiles[name].copy()
+                params['name'] = name
+                log_filename = f"R_{interest_rate}_{name}_vfi_log.txt"
+                params['log_path'] = os.path.join(vfi_log_dir, log_filename)
+                profile_params_list.append(params)
+
+            results = Parallel(n_jobs=-1, verbose=51)(delayed(calculate_vfi_for_profile)(prof_params, model_params) for prof_params in profile_params_list)
+            for profile_name, V, g in results:
+                self.vfi_cache[profile_name] = (V, g)
+
+            end_time = time.time()
+            print(f"--- VFI Pre-computation finished in {end_time - start_time:.2f} seconds. Cache is populated. ---")
 
         # --- Model Parameters ---
         self.num_agents = sum(population_composition.values())
@@ -452,45 +485,6 @@ class SavingModel(Model):
         self.schedule = RandomActivation(self)
         self.G = nx.watts_strogatz_graph(self.num_agents, k=4, p=0.1, seed=seed)
         
-        print("--- Starting VFI Pre-computation for all profiles ---")
-        start_time = time.time()
-        
-        # --- Parallel VFI Pre-computation ---
-        self.vfi_cache = {}
-        unique_profiles_to_compute = population_composition.keys()
-
-        vfi_log_dir = os.path.join(output_dir_text, "vfi_logs")
-        os.makedirs(vfi_log_dir, exist_ok=True)
-        
-        # Prepare arguments for the parallel function
-        model_params = {
-            'interest_rate': self.interest_rate, 'sigma': self.sigma,
-            'wealth_grid': self.wealth_grid, 'borrowing_limit': self.borrowing_limit
-        }
-        
-        profile_params_list = []
-        global agent_profiles
-        for name in unique_profiles_to_compute:
-            params = agent_profiles[name].copy()
-            params['name'] = name
-            log_filename = f"R_{interest_rate}_{name}_vfi_log.txt"
-            params['log_path'] = os.path.join(vfi_log_dir, log_filename)
-            profile_params_list.append(params)
-            
-
-        # Run the VFI for all profiles in parallel
-        # Each call to calculate_vfi_for_profile runs on a separate core
-        results = Parallel(n_jobs=-1, verbose=51)(
-            delayed(calculate_vfi_for_profile)(prof_params, model_params) for prof_params in profile_params_list
-        )
-
-        # Pre-populate the cache with the results [cite: 37-38]
-        for profile_name, V, g in results:
-            self.vfi_cache[profile_name] = (V, g)
-        
-        end_time = time.time()
-        print(f"--- VFI Pre-computation finished in {end_time - start_time:.2f} seconds. Cache is populated. ---")
-
         # --- Create Agents (who will now all get cache hits) ---
         self.create_agents(population_composition)
         
@@ -784,18 +778,45 @@ with open(log_filepath, "w") as log_file:
     seeds = range(1, NUM_REPLICATIONS + 1)
 
     # Loop through each experimental condition
-    for run_id, seed in enumerate(seeds):
+    for rate in interest_rates_to_test:
 
-        print(f"\n{'#'*25} STARTING REPLICATION {run_id + 1}/{NUM_REPLICATIONS} (Seed: {seed}) {'#'*25}")
+        print(f"\\n{'='*25} PRE-COMPUTING VFI FOR R = {rate} {'='*25}")
+        temp_model = SavingModel(
+            population_composition=population_to_simulate,
+            interest_rate=rate,
+            sigma=sigma,
+            wealth_dist=wealth_dist,
+            num_wealth_points=NUM_WEALTH_POINTS,
+            seed=1
+        )
 
-        for rate in interest_rates_to_test:
+        precomputed_cache = temp_model.vfi_cache
+        print("--- VFI Cache Generation Complete ---")
+
+        print("--- Exporting V and g functions from cache... ---")
+        output_dir_v_g = os.path.join(output_dir_csv, "v_g_functions")
+        os.makedirs(output_dir_v_g, exist_ok=True)
+        for profile_name, (V, g) in precomputed_cache.items():
+            v_g_base_filename = f"R_{rate}_{profile_name}"
+            v_func_path = os.path.join(output_dir_v_g, f"{v_g_base_filename}_value_function.npy")
+            g_func_path = os.path.join(output_dir_v_g, f"{v_g_base_filename}_policy_function.npy")
+            np.save(v_func_path, V)
+            np.save(g_func_path, g)
+            print(f"  > Saved V and g for profile '{profile_name}'")
+
+
+        
+
+        for run_id, seed in enumerate(seeds):
+
+            print(f"\n{'#'*25} STARTING REPLICATION {run_id + 1}/{NUM_REPLICATIONS} (Seed: {seed}) {'#'*25}")
+
             for run_name, settings in experiments.items():
                 if run_name not in experiments_to_run:
                     print(f"\n--- SKIPPING EXPERIMENT: '{run_name}' ---")
                     continue
                 print(f"\n{'='*20} RUNNING EXPERIMENT: '{run_name}' | Interest Rate (R) = {rate} {'='*20}")
             
-                # Create a fresh model instance. This will trigger the parallel VFI pre-computation.
                 model = SavingModel(
                     population_composition=population_to_simulate,
                     interest_rate=rate,
@@ -809,7 +830,8 @@ with open(log_filepath, "w") as log_file:
                     social_norm_strength=0.2,
                     peer_comparison_strength=0.2,
                     information_diffusion_strength=0.2,
-                    vfi_recalculation_interval=10 
+                    vfi_recalculation_interval=10,
+                    vfi_cache=precomputed_cache
                 )   
                 
                 # Run the model for the specified number of steps
