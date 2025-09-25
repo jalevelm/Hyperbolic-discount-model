@@ -105,10 +105,10 @@ def plot_phase1_validation(v_g_dir, num_wealth_points):
                 R_star = 1 + (1 - params['delta']) / (params['beta'] * params['delta'])
                 plt.plot(wealth_grid, g_func, label=f'{name.title()} (R* ≈ {R_star:.2f})')
 
-        plt.plot(wealth_grid, wealth_grid, 'k--', label="k' = k (Zero Net Saving)", alpha=0.6)
-        plt.title(f'Policy Functions g(k) for R = {rate}', fontsize=16)
-        plt.xlabel("Current Wealth (k)", fontsize=12)
-        plt.ylabel("Next Period's Wealth (k')", fontsize=12)
+        plt.plot(wealth_grid, wealth_grid, 'k--', label="k' = k (Ahorro neto cero)", alpha=0.6)
+        plt.title(f'Funciones de política de ahorro g(k) para R = {rate} (Escala log-log)', fontsize=16)
+        plt.xlabel("Riqueza actual (k)", fontsize=12)
+        plt.ylabel("Riqueza del siguiente periodo (k')", fontsize=12)
         plt.xscale('log')
         plt.yscale('log')
         plt.legend()
@@ -123,12 +123,13 @@ def plot_phase1_validation(v_g_dir, num_wealth_points):
             filepath = os.path.join(v_g_dir, f"R_{rate}_{name}_policy_function.npy")
             if os.path.exists(filepath):
                 g_func = np.load(filepath)
-                plt.plot(wealth_grid, g_func, label=f'{name.title()}')
+                R_star = 1 + (1 - params['delta']) / (params['beta'] * params['delta'])
+                plt.plot(wealth_grid, g_func, label=f'{name.title()} (R* ≈ {R_star:.2f})')
         
-        plt.plot(wealth_grid, wealth_grid, 'k--', label="k' = k (Zero Net Saving)", alpha=0.6)
-        plt.title(f'Policy Functions g(k) for R = {rate} (Linear Scale, Zoomed)', fontsize=16)
-        plt.xlabel("Current Wealth (k)", fontsize=12)
-        plt.ylabel("Next Period's Wealth (k')", fontsize=12)
+        plt.plot(wealth_grid, wealth_grid, 'k--', label="k' = k (Ahorro neto cero)", alpha=0.6)
+        plt.title(f'Funciones de política de ahorro g(k) para R = {rate} (Escala lineal)', fontsize=16)
+        plt.xlabel("Riqueza actual (k)", fontsize=12)
+        plt.ylabel("Riqueza del siguiente periodo (k')", fontsize=12)
         plt.xlim(0, 500) # Zoom in on the behavior of lower-wealth agents
         plt.ylim(0, 500)
         plt.legend()
@@ -145,9 +146,9 @@ def plot_phase1_validation(v_g_dir, num_wealth_points):
                 V_func = np.load(filepath)
                 plt.plot(wealth_grid, V_func, label=f'{name.title()}')
         
-        plt.title(f'Value Functions V(k) for R = {rate} (Log-X Scale)', fontsize=16)
-        plt.xlabel("Current Wealth (k)", fontsize=12)
-        plt.ylabel("Lifetime Utility V(k)", fontsize=12)
+        plt.title(f'Funciones de valor V(k) para R = {rate} (Escala log-X)', fontsize=16)
+        plt.xlabel("Riqueza actual (k)", fontsize=12)
+        plt.ylabel("Utilidad vitalicia V(k)", fontsize=12)
         plt.xscale('log')
         plt.legend()
         plt.grid(True, which="both", ls="--")
@@ -163,7 +164,7 @@ def plot_phase1_validation(v_g_dir, num_wealth_points):
                 V_func = np.load(filepath)
                 plt.plot(wealth_grid, V_func, label=f'{name.title()}')
         
-        plt.title(f'Value Functions V(k) for R = {rate} (Linear Scale)', fontsize=16)
+        plt.title(f'Funciones de valor V(k) para R = {rate} (Escala lineal)', fontsize=16)
         plt.xlabel("Current Wealth (k)", fontsize=12)
         plt.ylabel("Lifetime Utility V(k)", fontsize=12)
         plt.xlim(0, 500) # Zoom in on the behavior of lower-wealth agents
