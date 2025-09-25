@@ -174,6 +174,63 @@ def plot_phase1_validation(v_g_dir, num_wealth_points):
         plt.close()
         print(f"  > Saved LINEAR-SCALE value function plot for R={rate}")
 
+    # --- Plot 5: Savings RATE (g(k) / R*k) ---
+        plt.figure(figsize=(14, 8))
+        for name, params in agent_profiles.items():
+            filepath = os.path.join(v_g_dir, f"R_{rate}_{name}_policy_function.npy")
+            if os.path.exists(filepath):
+                g_func = np.load(filepath) # This is k'
+                
+                # Calculate total available resources (R*k)
+                # Add a small epsilon to avoid division by zero at the lowest wealth level
+                total_resources = rate * wealth_grid + 1e-9 
+                
+                # Calculate the savings rate
+                savings_rate = g_func / total_resources
+                
+                R_star = 1 + (1 - params['delta']) / (params['beta'] * params['delta'])
+                plt.plot(wealth_grid, savings_rate, label=f'{name.title()} (R* ≈ {R_star:.2f})')
+
+        plt.title(f'Tasa de Ahorro ($k\' / Rk$) para R = {rate}', fontsize=16)
+        plt.xlabel("Riqueza actual (k)", fontsize=12)
+        plt.ylabel("Tasa de Ahorro", fontsize=12)
+        plt.xscale('log') # Keep x-axis logarithmic to see the full wealth range
+        plt.legend()
+        plt.grid(True, which="both", ls="--")
+        plt.savefig(os.path.join(OUTPUT_DIR_PLOTS, f"PHASE1_savings_rate_R_{rate}.png"))
+        plt.close()
+        print(f"  > Saved SAVINGS RATE plot for R={rate}")
+
+    # --- Plot 6: Savings RATE (Linear Scale, Zoomed In) ---
+        plt.figure(figsize=(14, 8))
+        for name, params in agent_profiles.items():
+            filepath = os.path.join(v_g_dir, f"R_{rate}_{name}_policy_function.npy")
+            if os.path.exists(filepath):
+                g_func = np.load(filepath) # This is k'
+                
+                # Calculate total available resources (R*k)
+                total_resources = rate * wealth_grid + 1e-9 
+                
+                # Calculate the savings rate
+                savings_rate = g_func / total_resources
+                
+                R_star = 1 + (1 - params['delta']) / (params['beta'] * params['delta'])
+                plt.plot(wealth_grid, savings_rate, label=f'{name.title()} (R* ≈ {R_star:.2f})')
+
+        plt.title(f'Tasa de Ahorro ($k\' / Rk$) para R = {rate} (Escala Lineal)', fontsize=16)
+        plt.xlabel("Riqueza actual (k)", fontsize=12)
+        plt.ylabel("Tasa de Ahorro", fontsize=12)
+        
+        # --- KEY CHANGES HERE ---
+        # We remove the log scale and zoom in on a specific range
+        plt.xlim(0, 2000) 
+        
+        plt.legend()
+        plt.grid(True, which="both", ls="--")
+        plt.savefig(os.path.join(OUTPUT_DIR_PLOTS, f"PHASE1_savings_rate_linear_R_{rate}.png"))
+        plt.close()
+        print(f"  > Saved LINEAR-SCALE savings rate plot for R={rate}")
+
 ### --- PHASE 2 & 3: COMPARATIVE ANALYSIS --- ###
 def plot_time_series_comparison(data, metric, rate):
     """
