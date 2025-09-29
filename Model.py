@@ -719,11 +719,11 @@ wealth_dist = [
 
 # Define the population for the experiment
 population_to_simulate = {
-    "planner": 1,
-    "moderate": 1,
-    "procrastinator": 1,
-    "inverse procrastinator": 1,
-    "impulsive": 1
+    "planner": 15,
+    "moderate": 35,
+    "procrastinator": 30,
+    "inverse procrastinator": 10,
+    "impulsive": 10
 }
 
 # Define the conditions to iterate over

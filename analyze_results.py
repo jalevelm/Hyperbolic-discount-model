@@ -148,7 +148,7 @@ def plot_phase1_validation(v_g_dir, num_wealth_points):
         
         plt.title(f'Funciones de valor V(k) para R = {rate} (Escala log-X)', fontsize=16)
         plt.xlabel("Riqueza actual (k)", fontsize=12)
-        plt.ylabel("Utilidad vitalicia V(k)", fontsize=12)
+        plt.ylabel("Utilidad V(k)", fontsize=12)
         plt.xscale('log')
         plt.legend()
         plt.grid(True, which="both", ls="--")
@@ -165,8 +165,8 @@ def plot_phase1_validation(v_g_dir, num_wealth_points):
                 plt.plot(wealth_grid, V_func, label=f'{name.title()}')
         
         plt.title(f'Funciones de valor V(k) para R = {rate} (Escala lineal)', fontsize=16)
-        plt.xlabel("Current Wealth (k)", fontsize=12)
-        plt.ylabel("Lifetime Utility V(k)", fontsize=12)
+        plt.xlabel("Riqueza actual (k)", fontsize=12)
+        plt.ylabel("Utilidad V(k)", fontsize=12)
         plt.xlim(0, 500) # Zoom in on the behavior of lower-wealth agents
         plt.legend()
         plt.grid(True)
@@ -239,10 +239,10 @@ def plot_time_series_comparison(data, metric, rate):
     """
     plt.figure(figsize=(14, 8))
     sns.lineplot(data=data[data['Rate'] == rate], x='Step', y=metric, hue='Experiment', palette='viridis')
-    plt.title(f'{metric.replace("_", " ")} Over Time (R = {rate})', fontsize=16)
-    plt.xlabel('Simulation Step', fontsize=12)
+    plt.title(f'{metric.replace("_", " ")} en el tiempo (R = {rate})', fontsize=16)
+    plt.xlabel('Paso de la simulación', fontsize=12)
     plt.ylabel(metric.replace("_", " "), fontsize=12)
-    plt.legend(title='Experiment')
+    plt.legend(title='Experimento')
     plt.savefig(os.path.join(OUTPUT_DIR_PLOTS, f"PHASE2_3_TimeSeries_{metric}_R_{rate}.png"))
     plt.close()
     print(f"  > Saved time-series plot for {metric} at R={rate}")
@@ -252,17 +252,113 @@ def plot_final_distribution(data, metric, rate):
     Creates a box plot comparing the distribution of the final values for a
     metric across all experimental conditions.
     """
-    final_step_data = data[(data['Rate'] == rate) & (data['Step'] == SIMULATION_STEPS)]
+    final_step_data = data[(data['Rate'] == rate) & (data['Step'] == SIMULATION_STEPS - 1)]
     plt.figure(figsize=(14, 8))
     sns.boxplot(data=final_step_data, x='Experiment', y=metric, palette='viridis')
-    plt.title(f'Distribution of Final {metric.replace("_", " ")} (at Step {SIMULATION_STEPS}, R = {rate})', fontsize=16)
-    plt.xlabel('Experiment', fontsize=12)
-    plt.ylabel(f'Final {metric.replace("_", " ")}', fontsize=12)
+    plt.title(f'Distribución final de {metric.replace("_", " ")} (en el paso {SIMULATION_STEPS}, R = {rate})', fontsize=16)
+    plt.xlabel('Experimento', fontsize=12)
+    plt.ylabel(f'{metric.replace("_", " ")} Final', fontsize=12)
     plt.xticks(rotation=45, ha='right')
     plt.tight_layout()
     plt.savefig(os.path.join(OUTPUT_DIR_PLOTS, f"PHASE2_3_FinalDist_{metric}_R_{rate}.png"))
     plt.close()
     print(f"  > Saved final distribution plot for {metric} at R={rate}")
+
+def plot_wealth_by_profile(agent_data, rate):
+    """
+    Plots the average wealth trajectory over time, segmented by agent profile.
+    This shows how different agent types fare in each scenario.
+    """
+    plt.figure(figsize=(14, 8))
+    
+    # Filter data for the specific interest rate
+    data_subset = agent_data[agent_data['Rate'] == rate]
+    
+    sns.lineplot(data=data_subset, x='Step', y='Wealth', hue='Original_Profile', style='Experiment')
+    
+    plt.title(f'Trayectoria promedio de riqueza por perfil de agente (R = {rate})', fontsize=16)
+    plt.xlabel('Paso de la simulación', fontsize=12)
+    plt.ylabel('Riqueza promedio', fontsize=12)
+    plt.legend(title='Perfil de agente y experimento')
+    plt.grid(True, which="both", ls="--")
+    plt.savefig(os.path.join(OUTPUT_DIR_PLOTS, f"PHASE2_3_WealthByProfile_R_{rate}.png"))
+    plt.close()
+    print(f"  > Saved agent wealth by profile plot for R={rate}")
+
+
+def plot_final_wealth_distribution_histogram(agent_data, rate):
+    """
+    Creates a histogram on a LOG scale showing the initial vs. final
+    distribution of wealth across all individual agents. This function is
+    scalable and will plot all experiments found in the data.
+    """
+    final_step_agent_data = agent_data[(agent_data['Rate'] == rate) & (agent_data['Step'] == SIMULATION_STEPS - 1)]
+    initial_step_agent_data = agent_data[(agent_data['Rate'] == rate) & (agent_data['Step'] == 0)]
+
+    plt.figure(figsize=(14, 8))
+    
+    # 1. Plot the initial distribution, which is always the same
+    sns.histplot(data=initial_step_agent_data, x='Wealth', color="grey", alpha=0.5, 
+                 log_scale=True, label='Initial Distribution (t=0)')
+
+    # 2. Get a list of all unique experiments present in the final step data
+    experiments = final_step_agent_data['Experiment'].unique()
+    colors = sns.color_palette('viridis', n_colors=len(experiments))
+
+    # 3. Loop through each experiment and plot it individually
+    for i, exp_name in enumerate(experiments):
+        # Filter data for the current experiment
+        exp_data = final_step_agent_data[final_step_agent_data['Experiment'] == exp_name]
+        # Create the precise label for the legend
+        label = f'Final (t=200): {exp_name}'
+        # Plot this experiment's data
+        sns.histplot(data=exp_data, x='Wealth', color=colors[i], 
+                     alpha=0.5, log_scale=True, label=label, 
+                     element="step", kde=True)
+    
+    plt.title(f'Distribución inicial vs. final de riqueza (Escala Log), R = {rate})', fontsize=16)
+    plt.xlabel('Riqueza', fontsize=12)
+    plt.ylabel('Número de agentes', fontsize=12)
+    plt.legend() 
+    plt.tight_layout()
+    plt.savefig(os.path.join(OUTPUT_DIR_PLOTS, f"PHASE2_3_FinalWealthHistogram_WithInitial_R_{rate}.png"))
+    plt.close()
+    print(f"  > Saved final agent wealth histogram (with initial distribution) for R={rate}")
+
+def plot_final_wealth_distribution_linear(agent_data, rate):
+    """
+    Creates a histogram on a LINEAR scale showing the initial vs. final
+    distribution of wealth. This function is scalable and will plot
+    all experiments found in the data.
+    """
+    final_step_agent_data = agent_data[(agent_data['Rate'] == rate) & (agent_data['Step'] == SIMULATION_STEPS - 1)]
+    initial_step_agent_data = agent_data[(agent_data['Rate'] == rate) & (agent_data['Step'] == 0)]
+    
+    plt.figure(figsize=(14, 8))
+    
+    # 1. Plot the initial distribution
+    sns.histplot(data=initial_step_agent_data, x='Wealth', color="grey", alpha=0.5, 
+                 label='Initial Distribution (t=0)')
+    
+    # 2. Get a list of all unique experiments and set up colors
+    experiments = final_step_agent_data['Experiment'].unique()
+    colors = sns.color_palette('viridis', n_colors=len(experiments))
+
+    # 3. Loop through each experiment and plot it individually
+    for i, exp_name in enumerate(experiments):
+        exp_data = final_step_agent_data[final_step_agent_data['Experiment'] == exp_name]
+        label = f'Final (t=200): {exp_name}'
+        sns.histplot(data=exp_data, x='Wealth', color=colors[i], 
+                     alpha=0.5, label=label, element="step")
+    
+    plt.title(f'Distribución inicial vs. final de riqueza (Escala lineal), R = {rate})', fontsize=16)
+    plt.xlabel('Riqueza', fontsize=12)
+    plt.ylabel('Número de agentes', fontsize=12)
+    plt.legend()
+    plt.tight_layout()
+    plt.savefig(os.path.join(OUTPUT_DIR_PLOTS, f"PHASE2_3_FinalWealthHistogram_LINEAR_WithInitial_R_{rate}.png"))
+    plt.close()
+    print(f"  > Saved final agent wealth LINEAR histogram (with initial distribution) for R={rate}")
 
 def perform_statistical_analysis(data, metric, rate):
     """
@@ -270,7 +366,7 @@ def perform_statistical_analysis(data, metric, rate):
     between the baseline and other experiments.
     """
     print(f"\n--- Statistical Analysis for '{metric}' at R={rate} ---")
-    final_step_data = data[(data['Rate'] == rate) & (data['Step'] == SIMULATION_STEPS)]
+    final_step_data = data[(data['Rate'] == rate) & (data['Step'] == SIMULATION_STEPS - 1)]
     
     experiments = final_step_data['Experiment'].unique()
     if len(experiments) < 2:
@@ -374,5 +470,12 @@ if __name__ == "__main__":
 
         # Plot the underlying social mechanisms from agent data
         plot_mechanism_dynamics(agent_data, interest_rate)
+
+        plot_wealth_by_profile(agent_data, interest_rate)
+
+        plot_final_wealth_distribution_histogram(agent_data, interest_rate)
+
+        plot_final_wealth_distribution_linear(agent_data, interest_rate)
+
 
     print("\n--- Analysis complete. All plots saved to 'output_plots' directory. ---")
