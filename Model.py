@@ -291,7 +291,7 @@ def get_wealth_quantile(model, quantile):
         return 0
     return np.quantile(agent_wealths, q=quantile)
 
-# --- Standalone VFI Function (now with its own logging) ---
+# --- Standalone VFI Function---
 def calculate_vfi_for_profile(profile_params, model_params):
     """
     Performs VFI and writes its detailed progress to a unique log file.
@@ -323,7 +323,6 @@ def calculate_vfi_for_profile(profile_params, model_params):
             
             start_time = time.time()
 
-            # (Nested utility and optimize_savings functions are the same as before)
             def utility(consumption):
                 consumption = max(consumption, 1e-9)
                 if sigma == 1: return np.log(consumption)
@@ -657,8 +656,8 @@ class SavingModel(Model):
         profile_params_list = []
         global agent_profiles
         for name, beta, delta in profiles_to_compute:
-            # Add this new dynamic profile to the global dictionary for tracking
-            agent_profiles[name] = {"beta": beta, "delta": delta, "vfi_iterations": 100, "financial_literacy": 0} # Literacy can be a default
+            
+            agent_profiles[name] = {"beta": beta, "delta": delta, "vfi_iterations": 1000, "financial_literacy": 0} # Literacy can be a default
             
             params = agent_profiles[name].copy()
             params['name'] = name
@@ -749,7 +748,7 @@ experiments = {
     }
 }
 
-experiments_to_run = ["baseline"]
+experiments_to_run = ["peer_comparison_only", "social_norms_only", "info_diffusion_only", "all_interactions"]
 
 # --- 2. Setup Output Directories ---
 output_dir_csv = "output_csv"
@@ -776,6 +775,10 @@ with open(log_filepath, "w") as log_file:
 
     NUM_REPLICATIONS = 30
     seeds = range(1, NUM_REPLICATIONS + 1)
+
+    total_runs = len(interest_rates_to_test) * len(experiments_to_run) * NUM_REPLICATIONS
+    completed_runs = 0
+    start_time = time.time()
 
     # Loop through each experimental condition
     for rate in interest_rates_to_test:
@@ -827,9 +830,9 @@ with open(log_filepath, "w") as log_file:
                     peer_comparison_active=settings["peer_comparison_active"],
                     social_norm_active=settings["social_norm_active"],
                     information_diffusion_active=settings["information_diffusion_active"],
-                    social_norm_strength=0.2,
-                    peer_comparison_strength=0.2,
-                    information_diffusion_strength=0.2,
+                    social_norm_strength=0.15,
+                    peer_comparison_strength=0.15,
+                    information_diffusion_strength=0.15,
                     vfi_recalculation_interval=10,
                     vfi_cache=precomputed_cache
                 )   
@@ -854,6 +857,15 @@ with open(log_filepath, "w") as log_file:
                 
                 print(f"Successfully saved Agent Data to: {agent_data_filepath}")
                 print(f"Successfully saved Model Data to: {model_data_filepath}")
+
+                completed_runs += 1
+                progress_percent = (completed_runs / total_runs) * 100
+                elapsed_seconds = time.time() - start_time
+                elapsed_h = int(elapsed_seconds // 3600)
+                elapsed_m = int((elapsed_seconds % 3600) // 60)
+                elapsed_s = int(elapsed_seconds % 60)
+                time_str = f"{elapsed_h:02d}:{elapsed_m:02d}:{elapsed_s:02d}"
+                print(f"Overall Progress: [{completed_runs}/{total_runs}] {progress_percent:.1f}% Complete", end='\\r', file=sys.stderr)
                 
                 if run_name == "baseline": # Only save V/g on the first run to avoid redundancy
                     print("--- Exporting V and g functions from cache... ---")
