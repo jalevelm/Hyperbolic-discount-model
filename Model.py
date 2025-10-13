@@ -132,11 +132,9 @@ class SavingAgent(Agent):
             # For a grid, neighbors are in adjacent cells. moore=True includes diagonals.
             return self.model.grid.get_neighbors(self.pos, moore=True, include_center=False)
         elif isinstance(self.model.grid, NetworkGrid):
-            # For a network, neighbors are agents connected by an edge.
-            # The grid returns their unique_id, so we get the agent objects
-            # from the model's scheduler.
-            neighbor_ids = self.model.grid.get_neighbors(self.unique_id, include_center=False)
-            return [self.model.schedule.agents[i] for i in neighbor_ids]
+            # For a network, the NetworkGrid's get_neighbors() method 
+            # returns the actual agent objects directly.
+            return self.model.grid.get_neighbors(self.unique_id, include_center=False)
         return []
 
     def step(self):
@@ -482,7 +480,6 @@ class SavingModel(Model):
         # --- Mesa Components ---
         self.setup_network(network, network_params)
         self.schedule = RandomActivation(self)
-        self.G = nx.watts_strogatz_graph(self.num_agents, k=4, p=0.1, seed=seed)
         
         # --- Create Agents (who will now all get cache hits) ---
         self.create_agents(population_composition)
@@ -609,6 +606,9 @@ class SavingModel(Model):
                         pos = self.random.choice(list(empty_cells))
                         # Place the agent there
                         self.grid.place_agent(agent, pos)
+                elif isinstance(self.grid, NetworkGrid):
+                    # Place the agent on the network node corresponding to its unique_id
+                    self.grid.place_agent(agent, agent.unique_id)
                 # --------------------------------
 
                 agent_id_counter += 1
@@ -657,7 +657,7 @@ class SavingModel(Model):
         global agent_profiles
         for name, beta, delta in profiles_to_compute:
             
-            agent_profiles[name] = {"beta": beta, "delta": delta, "vfi_iterations": 1000, "financial_literacy": 0} # Literacy can be a default
+            agent_profiles[name] = {"beta": beta, "delta": delta, "vfi_iterations": 1000, "financial_literacy": 0} 
             
             params = agent_profiles[name].copy()
             params['name'] = name
@@ -719,16 +719,16 @@ wealth_dist = [
 # Define the population for the experiment
 population_to_simulate = {
     "planner": 15,
-    "moderate": 35,
-    "procrastinator": 30,
+    "moderate": 35, 
+    "procrastinator": 30, 
     "inverse procrastinator": 10,
     "impulsive": 10
 }
 
 # Define the conditions to iterate over
-interest_rates_to_test = [1.05, 1.12]
+interest_rates_to_test = [1.05, 1.12] 
 SIMULATION_STEPS = 200
-NUM_WEALTH_POINTS = 1000
+NUM_WEALTH_POINTS = 1000 
 
 experiments = {
     "baseline": {
@@ -790,6 +790,8 @@ with open(log_filepath, "w") as log_file:
             sigma=sigma,
             wealth_dist=wealth_dist,
             num_wealth_points=NUM_WEALTH_POINTS,
+            network='watts_strogatz',  # Specify the network type
+            network_params={'k': 4, 'p': 0.1}, # Define the network's parameters
             seed=1
         )
 
@@ -826,6 +828,8 @@ with open(log_filepath, "w") as log_file:
                     sigma=sigma,
                     wealth_dist=wealth_dist,
                     num_wealth_points=NUM_WEALTH_POINTS,
+                    network='watts_strogatz', 
+                    network_params={'k': 4, 'p': 0.1},
                     seed=seed,
                     peer_comparison_active=settings["peer_comparison_active"],
                     social_norm_active=settings["social_norm_active"],
