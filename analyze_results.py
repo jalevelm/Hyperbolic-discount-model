@@ -221,8 +221,7 @@ def plot_phase1_validation(v_g_dir, num_wealth_points):
         plt.xlabel("Riqueza actual (k)", fontsize=12)
         plt.ylabel("Tasa de Ahorro", fontsize=12)
         
-        # --- KEY CHANGES HERE ---
-        # We remove the log scale and zoom in on a specific range
+
         plt.xlim(0, 2000) 
         
         plt.legend()
@@ -433,17 +432,25 @@ def plot_mechanism_dynamics(agent_data, rate):
 # --- 4. MAIN EXECUTION BLOCK ---
 # =============================================================================
 if __name__ == "__main__":
-    # --- Load Data ---
-    model_data, agent_data = load_and_aggregate_data(OUTPUT_DIR_CSV)
-    print("\n--- Exporting fully aggregated data to CSV files... ---")
+    # --- Define paths for the final aggregated CSV files ---
     agg_model_path = os.path.join(OUTPUT_DIR_PLOTS, "aggregated_model_data_all_runs.csv")
     agg_agent_path = os.path.join(OUTPUT_DIR_PLOTS, "aggregated_agent_data_all_runs.csv")
-    
-    model_data.to_csv(agg_model_path, index=False)
-    agent_data.to_csv(agg_agent_path, index=False)
-    
-    print(f"  > Saved aggregated model data to: {agg_model_path}")
-    print(f"  > Saved aggregated agent data to: {agg_agent_path}")
+
+    # --- Check if aggregated data already exists ---
+    if os.path.exists(agg_model_path) and os.path.exists(agg_agent_path):
+        print("--- Found existing aggregated data files. Loading directly. ---")
+        model_data = pd.read_csv(agg_model_path)
+        agent_data = pd.read_csv(agg_agent_path)
+        print("--- Data loaded successfully from cache. ---")
+    else:
+        print("--- No aggregated data found. Running full aggregation process. ---")
+        # --- Load and aggregate data from scratch ---
+        model_data, agent_data = load_and_aggregate_data(OUTPUT_DIR_CSV)
+        print("\n--- Exporting fully aggregated data to CSV files for caching... ---")
+        model_data.to_csv(agg_model_path, index=False)
+        agent_data.to_csv(agg_agent_path, index=False)
+        print(f"  > Saved aggregated model data to: {agg_model_path}")
+        print(f"  > Saved aggregated agent data to: {agg_agent_path}")
 
     # --- Run Phase 1 Analysis ---
     if os.path.exists(V_G_DIR):

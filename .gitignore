@@ -13,3 +13,5 @@ __pycache__/
 output_csv/
 output_text/
 output_plots/
+
+replication_verif.py

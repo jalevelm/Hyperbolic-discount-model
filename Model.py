@@ -544,7 +544,8 @@ class SavingModel(Model):
             # The nodes of the graph are integers from 0 to N-1
             g = nx.watts_strogatz_graph(n=self.num_agents, 
                                        k=params.get('k', 4), 
-                                       p=params.get('p', 0.1))
+                                       p=params.get('p', 0.1),
+                                       seed=self._seed)
             self.grid = NetworkGrid(g)
             print(f"  > Created Watts-Strogatz network with n={self.num_agents}, k={params.get('k', 4)}, p={params.get('p', 0.1)}.")
             
@@ -571,16 +572,16 @@ class SavingModel(Model):
 
             for i in range(count):
                 # Determine initial wealth
-                rand_num = random.random()
+                rand_num = self.random.random()
                 cumulative_prob = 0
                 init_wealth = 0
                 for prob, wealth_range in self.wealth_dist:
                     cumulative_prob += prob
                     if rand_num <= cumulative_prob:
-                        init_wealth = random.randint(wealth_range[0], wealth_range[1])
+                        init_wealth = self.random.randint(wealth_range[0], wealth_range[1])
                         break
                 else:
-                    init_wealth = random.randint(self.wealth_dist[-1][1][0], self.wealth_dist[-1][1][1])
+                    init_wealth = self.random.randint(self.wealth_dist[-1][1][0], self.wealth_dist[-1][1][1])
 
                 agent_vfi_iterations = profile_params.get("vfi_iterations", 50)
 
@@ -728,7 +729,7 @@ population_to_simulate = {
 # Define the conditions to iterate over
 interest_rates_to_test = [1.05, 1.12] 
 SIMULATION_STEPS = 200
-NUM_WEALTH_POINTS = 1000 
+NUM_WEALTH_POINTS = 1000
 
 experiments = {
     "baseline": {
@@ -748,7 +749,7 @@ experiments = {
     }
 }
 
-experiments_to_run = ["peer_comparison_only", "social_norms_only", "info_diffusion_only", "all_interactions"]
+experiments_to_run = ["baseline"]
 
 # --- 2. Setup Output Directories ---
 output_dir_csv = "output_csv"
