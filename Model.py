@@ -422,7 +422,7 @@ class SavingModel(Model):
                  peer_comparison_strength=0.05,
                  social_norm_strength=0.05,
                  information_diffusion_strength=0.05,
-                 vfi_recalculation_interval=10,
+                 vfi_recalculation_interval=20,
                  vfi_cache=None):
 
         super().__init__(seed=seed)
@@ -667,7 +667,7 @@ class SavingModel(Model):
             profile_params_list.append(params)
 
         start_time = time.time()
-        results = Parallel(n_jobs=-1, verbose=51)(
+        results = Parallel(n_jobs=8, verbose=51)(
             delayed(calculate_vfi_for_profile)(prof_params, model_params) for prof_params in profile_params_list
         )
 
@@ -870,7 +870,7 @@ with open(log_filepath, "w") as log_file:
                 elapsed_m = int((elapsed_seconds % 3600) // 60)
                 elapsed_s = int(elapsed_seconds % 60)
                 time_str = f"{elapsed_h:02d}:{elapsed_m:02d}:{elapsed_s:02d}"
-                print(f"Overall Progress: [{completed_runs}/{total_runs}] {progress_percent:.1f}% Complete", end='\\r', file=sys.stderr)
+                print(f"Overall Progress: [{completed_runs}/{total_runs}] {progress_percent:.1f}% Completed in {time_str}", end='\\r', file=sys.stderr)
                 
                 if run_name == "baseline": # Only save V/g on the first run to avoid redundancy
                     print("--- Exporting V and g functions from cache... ---")
