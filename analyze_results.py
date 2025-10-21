@@ -404,7 +404,7 @@ def plot_verification_histograms(rate):
         print(f"  > No data found in verification file for R = {rate} after filtering.")
         return
     
-    FLOOR_VALUE = 1e-7
+    FLOOR_VALUE = 1e-2
     data_to_plot['Wealth'] = np.clip(data_to_plot['Wealth'], a_min=FLOOR_VALUE, a_max=None)
 
     # Get the experiments to plot 
