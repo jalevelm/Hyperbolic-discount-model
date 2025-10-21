@@ -17,7 +17,7 @@ V_G_DIR = os.path.join(OUTPUT_DIR_CSV, "v_g_functions")
 os.makedirs(OUTPUT_DIR_PLOTS, exist_ok=True)
 os.makedirs(OUTPUT_DIR_TABLES, exist_ok=True)
 
-# --- Constants from experimental design ---
+# --- Constants from your experimental design ---
 NUM_REPLICATIONS = 30
 SIMULATION_STEPS = 200
 NUM_WEALTH_POINTS = 1000
@@ -28,7 +28,7 @@ palette = sns.color_palette("viridis", 5)
 
 # --- Analysis Configuration ---
 GENERATE_PHASE_1_PLOTS = False
-EXPERIMENTS_TO_PLOT = []
+EXPERIMENTS_TO_PLOT = ["baseline", "social_norms_only"]
 
 # =============================================================================
 # --- 2. DATA LOADING AND AGGREGATION ---
@@ -58,7 +58,7 @@ def load_and_aggregate_data(csv_dir):
         if match:
             run_name, rate, rep = match.groups()
             df = pd.read_csv(os.path.join(csv_dir, f))
-            df = df.rename(columns={'Unnamed: 0': 'Step'})
+            df = df.rename(columns={'Unnamed: 0': 'Step', 'Unnamed: 1': 'AgentID'})
             df['Experiment'] = run_name.rstrip('_')
             df['Rate'] = float(rate)
             df['Replication'] = int(rep)
@@ -77,7 +77,7 @@ def load_and_aggregate_data(csv_dir):
 # =============================================================================
 def generate_summary_table(model_data, agent_data, rate):
     """
-    Generates a summary table with initial and final values for key metrics.
+    Generates a summary table with initial/final values, broke agents, and wealth distribution stats.
     """
     print(f"--- Generating Summary Table for R = {rate} ---")
     model_rate_data = model_data[model_data['Rate'] == rate]
@@ -87,6 +87,7 @@ def generate_summary_table(model_data, agent_data, rate):
     initial_agent_data = agent_rate_data[agent_rate_data['Step'] == 0]
 
     initial_avg_wealth = initial_model_data['Average Wealth'].mean()
+    initial_median_wealth = initial_agent_data['Wealth'].median() # <-- NEW
     initial_avg_consumption = initial_model_data['Average Consumption'].mean()
     initial_gini = initial_model_data['Gini_Coefficient'].mean()
     initial_avg_beta = initial_agent_data['Beta'].mean()
@@ -106,7 +107,10 @@ def generate_summary_table(model_data, agent_data, rate):
         exp_final_model = final_model_data[final_model_data['Experiment'] == exp]
         exp_final_agent = final_agent_data[final_agent_data['Experiment'] == exp]
 
+        # --- Standard Metrics ---
         final_avg_wealth = exp_final_model['Average Wealth'].mean()
+        final_median_wealth = exp_final_agent['Wealth'].median() # <-- NEW
+        final_std_dev_wealth = exp_final_agent['Wealth'].std() # <-- NEW
         final_avg_consumption = exp_final_model['Average Consumption'].mean()
         final_avg_savings = exp_final_model['Average Savings'].mean()
         final_gini = exp_final_model['Gini_Coefficient'].mean()
@@ -116,16 +120,25 @@ def generate_summary_table(model_data, agent_data, rate):
         final_avg_beta = exp_final_agent['Beta'].mean()
         final_avg_fin_lit = exp_final_agent['Financial_Literacy'].mean()
 
+        # --- Deltas ---
         pct_delta_wealth = ((final_avg_wealth - initial_avg_wealth) / initial_avg_wealth) * 100
         pct_delta_consumption = ((final_avg_consumption - initial_avg_consumption) / initial_avg_consumption) * 100
         pct_delta_savings = ((final_avg_savings - initial_meaningful_savings) / initial_meaningful_savings) * 100 if initial_meaningful_savings != 0 else 0
         delta_gini = final_gini - initial_gini
+        
+        # --- Broke Agents ---
+        total_final_agents = len(exp_final_agent)
+        broke_agents_count = len(exp_final_agent[exp_final_agent['Wealth'] < 0.1])
+        percentage_broke = (broke_agents_count / total_final_agents) * 100 if total_final_agents > 0 else 0
 
         table_rows.append({
             'Experiment': exp,
             'Initial Avg. Wealth': initial_avg_wealth,
             'Avg. Wealth (Final)': final_avg_wealth,
             '% Δ Avg. Wealth (final-initial)': pct_delta_wealth,
+            'Initial Median Wealth': initial_median_wealth, # <-- NEW
+            'Median Wealth (Final)': final_median_wealth, # <-- NEW
+            'Std. Dev. Wealth (Final)': final_std_dev_wealth, # <-- NEW
             'Initial Avg. Consumption': initial_avg_consumption,
             'Avg. Consumption (Final)': final_avg_consumption,
             '% Δ Avg. Consumption (final-initial)': pct_delta_consumption,
@@ -135,6 +148,7 @@ def generate_summary_table(model_data, agent_data, rate):
             'Initial Gini': initial_gini,
             'Gini (Final)': final_gini,
             'Δ Gini (Final-Initial)': delta_gini,
+            '% Broke Agents (Final)': percentage_broke,
             'Final 90/10 Wealth Ratio': final_90_10_ratio,
             'Initial Avg. Beta': initial_avg_beta,
             'Final Avg. Beta': final_avg_beta,
@@ -181,21 +195,28 @@ def generate_statistical_table(model_data, agent_data, rate):
     }
 
     for metric_name, (data_source, col_name) in metrics_to_test.items():
-        grouped_data_for_anova = []
-        if data_source == 'model':
-            for exp in all_experiments:
-                grouped_data_for_anova.append(final_model_data[final_model_data['Experiment'] == exp][col_name])
-        else:
-            for exp in all_experiments:
-                grouped_data_for_anova.append(final_agent_data[final_agent_data['Experiment'] == exp].groupby('Replication')[col_name].mean())
+        f_stat = 'N/A'
+        beta_modifying_experiments = {'social_norms_only', 'all_interactions'}
         
-        if len(grouped_data_for_anova) > 1:
-            f_stat, _ = stats.f_oneway(*grouped_data_for_anova)
-        else:
-            f_stat = 'N/A'
+        is_beta_metric_and_relevant = (metric_name == 'Final Avg. Beta' and any(exp in beta_modifying_experiments for exp in all_experiments))
+        is_not_beta_metric = metric_name != 'Final Avg. Beta'
+
+        if is_not_beta_metric or is_beta_metric_and_relevant:
+            grouped_data_for_anova = []
+            if data_source == 'model':
+                for exp in all_experiments:
+                    grouped_data_for_anova.append(final_model_data[final_model_data['Experiment'] == exp][col_name])
+            else:
+                for exp in all_experiments:
+                    grouped_data_for_anova.append(final_agent_data[final_agent_data['Experiment'] == exp].groupby('Replication')[col_name].mean())
+            
+            if len(grouped_data_for_anova) > 1:
+                with np.testing.suppress_warnings() as sup:
+                    sup.filter(RuntimeWarning)
+                    f_stat, _ = stats.f_oneway(*grouped_data_for_anova)
 
         for exp in experiments_to_compare:
-            if metric_name == 'Final Avg. Beta' and exp not in ['social_norms_only', 'all_interactions']:
+            if metric_name == 'Final Avg. Beta' and exp not in beta_modifying_experiments:
                 stat_results.append({
                     'Metric Tested': metric_name,
                     'Experiment Comparison': f"{exp} vs. Baseline",
@@ -253,10 +274,10 @@ def plot_phase1_validation(v_g_dir, num_wealth_points):
                 g_func = np.load(filepath)
                 R_star = 1 + (1 - params['delta']) / (params['beta'] * params['delta'])
                 plt.plot(wealth_grid, g_func, label=f'{name.title()} (R* ≈ {R_star:.2f})')
-        plt.plot(wealth_grid, wealth_grid, 'k--', label="k' = k (Zero Net Savings)", alpha=0.6)
-        plt.title(f'Saving Policy Functions g(k) for R = {rate} (log-log scale)', fontsize=16)
-        plt.xlabel("Current Wealth (k)", fontsize=12)
-        plt.ylabel("Next Period Wealth (k')", fontsize=12)
+        plt.plot(wealth_grid, wealth_grid, 'k--', label="k' = k (Ahorro Neto Cero)", alpha=0.6)
+        plt.title(f'Funciones de Política de Ahorro g(k) para R = {rate} (escala log-log)', fontsize=16)
+        plt.xlabel("Riqueza Actual (k)", fontsize=12)
+        plt.ylabel("Riqueza del Siguiente Periodo (k')", fontsize=12)
         plt.xscale('log')
         plt.yscale('log')
         plt.legend()
@@ -268,10 +289,10 @@ def plot_phase1_validation(v_g_dir, num_wealth_points):
 def plot_time_series_comparison(data, metric, rate):
     plt.figure(figsize=(14, 8))
     sns.lineplot(data=data[data['Rate'] == rate], x='Step', y=metric, hue='Experiment', palette='viridis')
-    plt.title(f'{metric.replace("_", " ")} Over Time (R = {rate})', fontsize=16)
-    plt.xlabel('Simulation Step', fontsize=12)
+    plt.title(f'{metric.replace("_", " ")} a lo Largo del Tiempo (R = {rate})', fontsize=16)
+    plt.xlabel('Paso de Simulación', fontsize=12)
     plt.ylabel(metric.replace("_", " "), fontsize=12)
-    plt.legend(title='Experiment')
+    plt.legend(title='Experimento')
     plt.savefig(os.path.join(OUTPUT_DIR_PLOTS, f"PHASE2_3_TimeSeries_{metric}_R_{rate}.png"))
     plt.close()
     print(f"  > Saved time-series plot for {metric} at R={rate}")
@@ -280,41 +301,39 @@ def plot_final_distribution(data, metric, rate):
     final_step_data = data[(data['Rate'] == rate) & (data['Step'] == SIMULATION_STEPS - 1)]
     plt.figure(figsize=(14, 8))
     sns.boxplot(data=final_step_data, x='Experiment', y=metric, palette='viridis')
-    plt.title(f'Final Distribution of {metric.replace("_", " ")} (Step {SIMULATION_STEPS}, R = {rate})', fontsize=16)
-    plt.xlabel('Experiment', fontsize=12)
-    plt.ylabel(f'Final {metric.replace("_", " ")}', fontsize=12)
+    plt.title(f'Distribución Final de {metric.replace("_", " ")} (Paso {SIMULATION_STEPS}, R = {rate})', fontsize=16)
+    plt.xlabel('Experimento', fontsize=12)
+    plt.ylabel(f'{metric.replace("_", " ")} Final', fontsize=12)
     plt.xticks(rotation=45, ha='right')
     plt.tight_layout()
     plt.savefig(os.path.join(OUTPUT_DIR_PLOTS, f"PHASE2_3_FinalDist_{metric}_R_{rate}.png"))
     plt.close()
     print(f"  > Saved final distribution plot for {metric} at R={rate}")
 
-# --- NEWLY ADDED PLOTTING FUNCTIONS ---
 def plot_wealth_by_profile(agent_data, rate):
-    """
-    Plots the average wealth trajectory over time, segmented by agent profile.
-    """
     plt.figure(figsize=(14, 8))
     data_subset = agent_data[agent_data['Rate'] == rate]
     sns.lineplot(data=data_subset, x='Step', y='Wealth', hue='Original_Profile', style='Experiment')
-    plt.title(f'Average Wealth Trajectory by Agent Profile (R = {rate})', fontsize=16)
-    plt.xlabel('Simulation Step', fontsize=12)
-    plt.ylabel('Average Wealth', fontsize=12)
-    plt.legend(title='Agent Profile & Experiment')
+    plt.title(f'Trayectoria de Riqueza Promedio por Perfil de Agente (R = {rate})', fontsize=16)
+    plt.xlabel('Paso de Simulación', fontsize=12)
+    plt.ylabel('Riqueza Promedio', fontsize=12)
+    plt.legend(title='Perfil de Agente y Experimento')
     plt.grid(True, which="both", ls="--")
     plt.savefig(os.path.join(OUTPUT_DIR_PLOTS, f"PHASE2_3_WealthByProfile_R_{rate}.png"))
     plt.close()
     print(f"  > Saved agent wealth by profile plot for R={rate}")
 
 def plot_final_wealth_distribution_histogram(agent_data, rate):
-    """
-    Creates a histogram on a LOG scale showing the initial vs. final distribution of wealth.
-    """
     final_step_agent_data = agent_data[(agent_data['Rate'] == rate) & (agent_data['Step'] == SIMULATION_STEPS - 1)]
     initial_step_agent_data = agent_data[(agent_data['Rate'] == rate) & (agent_data['Step'] == 0)]
+
+    FLOOR_VALUE = 1e-2
+    initial_step_agent_data['Wealth'] = np.clip(initial_step_agent_data['Wealth'], a_min=FLOOR_VALUE, a_max=None)
+    final_step_agent_data['Wealth'] = np.clip(final_step_agent_data['Wealth'], a_min=FLOOR_VALUE, a_max=None)
+
     plt.figure(figsize=(14, 8))
     sns.histplot(data=initial_step_agent_data, x='Wealth', color="grey", alpha=0.5, 
-                 log_scale=True, label='Initial Distribution (t=0)')
+                 log_scale=True, label='Distribución Inicial (t=0)')
     experiments = final_step_agent_data['Experiment'].unique()
     colors = sns.color_palette('viridis', n_colors=len(experiments))
     for i, exp_name in enumerate(experiments):
@@ -322,10 +341,10 @@ def plot_final_wealth_distribution_histogram(agent_data, rate):
         label = f'Final (t={SIMULATION_STEPS}): {exp_name}'
         sns.histplot(data=exp_data, x='Wealth', color=colors[i], 
                      alpha=0.5, log_scale=True, label=label, 
-                     element="step", kde=True)
-    plt.title(f'Initial vs. Final Wealth Distribution (Log Scale), R = {rate})', fontsize=16)
-    plt.xlabel('Wealth', fontsize=12)
-    plt.ylabel('Number of Agents', fontsize=12)
+                     element="step")
+    plt.title(f'Distribución de Riqueza Inicial vs. Final (Escala Log), R = {rate})', fontsize=16)
+    plt.xlabel('Riqueza', fontsize=12)
+    plt.ylabel('Número de Agentes', fontsize=12)
     plt.legend() 
     plt.tight_layout()
     plt.savefig(os.path.join(OUTPUT_DIR_PLOTS, f"PHASE2_3_FinalWealthHistogram_WithInitial_R_{rate}.png"))
@@ -333,14 +352,11 @@ def plot_final_wealth_distribution_histogram(agent_data, rate):
     print(f"  > Saved final agent wealth histogram (log scale) for R={rate}")
 
 def plot_final_wealth_distribution_linear(agent_data, rate):
-    """
-    Creates a histogram on a LINEAR scale showing the initial vs. final distribution of wealth.
-    """
     final_step_agent_data = agent_data[(agent_data['Rate'] == rate) & (agent_data['Step'] == SIMULATION_STEPS - 1)]
     initial_step_agent_data = agent_data[(agent_data['Rate'] == rate) & (agent_data['Step'] == 0)]
     plt.figure(figsize=(14, 8))
     sns.histplot(data=initial_step_agent_data, x='Wealth', color="grey", alpha=0.5, 
-                 label='Initial Distribution (t=0)')
+                 label='Distribución Inicial (t=0)')
     experiments = final_step_agent_data['Experiment'].unique()
     colors = sns.color_palette('viridis', n_colors=len(experiments))
     for i, exp_name in enumerate(experiments):
@@ -348,40 +364,115 @@ def plot_final_wealth_distribution_linear(agent_data, rate):
         label = f'Final (t={SIMULATION_STEPS}): {exp_name}'
         sns.histplot(data=exp_data, x='Wealth', color=colors[i], 
                      alpha=0.5, label=label, element="step")
-    plt.title(f'Initial vs. Final Wealth Distribution (Linear Scale), R = {rate})', fontsize=16)
-    plt.xlabel('Wealth', fontsize=12)
-    plt.ylabel('Number of Agents', fontsize=12)
+    plt.title(f'Distribución de Riqueza Inicial vs. Final (Escala Lineal), R = {rate})', fontsize=16)
+    plt.xlabel('Riqueza', fontsize=12)
+    plt.ylabel('Número de Agentes', fontsize=12)
     plt.legend()
     plt.tight_layout()
     plt.savefig(os.path.join(OUTPUT_DIR_PLOTS, f"PHASE2_3_FinalWealthHistogram_LINEAR_WithInitial_R_{rate}.png"))
     plt.close()
     print(f"  > Saved final agent wealth histogram (linear scale) for R={rate}")
-# ------------------------------------
+
+def plot_verification_histograms(rate):
+    """
+    Plots histograms directly from the verification CSV to be 100% certain
+    that the data is what the table says it is.
+    This version RESPECTS the global EXPERIMENTS_TO_PLOT list.
+    """
+    print(f"\n--- Generating plots from VERIFICATION CSV for R = {rate} ---")
+    verification_file = os.path.join(OUTPUT_DIR_TABLES, "VERIFICATION_final_step_agent_wealth.csv")
+    
+    try:
+        # Read the clean, pre-filtered data
+        df = pd.read_csv(verification_file)
+    except FileNotFoundError:
+        print(f"  > ERROR: Could not find {verification_file}.")
+        print("  > Please ensure you ran the script once to generate it.")
+        return
+
+    # Filter for the specific rate
+    data_to_plot = df[df['Rate'] == rate].copy()
+    
+    global EXPERIMENTS_TO_PLOT 
+    if EXPERIMENTS_TO_PLOT: # Check if the list is not empty
+        print(f"  > VERIFICATION PLOT: Filtering for {EXPERIMENTS_TO_PLOT}")
+        # Apply the filter
+        data_to_plot = data_to_plot[data_to_plot['Experiment'].isin(EXPERIMENTS_TO_PLOT)]
+    # --- END OF FIX ---
+    
+    if data_to_plot.empty:
+        print(f"  > No data found in verification file for R = {rate} after filtering.")
+        return
+    
+    FLOOR_VALUE = 1e-7
+    data_to_plot['Wealth'] = np.clip(data_to_plot['Wealth'], a_min=FLOOR_VALUE, a_max=None)
+
+    # Get the experiments to plot 
+    experiments = sorted(data_to_plot['Experiment'].unique())
+    colors = sns.color_palette('viridis', n_colors=len(experiments))
+
+    # --- Plot 1: Log Scale (The one that was contradictory) ---
+    plt.figure(figsize=(14, 8))
+    
+    for i, exp_name in enumerate(experiments):
+        exp_data = data_to_plot[data_to_plot['Experiment'] == exp_name]
+        label = f'Final (t={SIMULATION_STEPS}): {exp_name}'
+        sns.histplot(data=exp_data, x='Wealth', color=colors[i], 
+                     alpha=0.5, log_scale=True, label=label, 
+                     element="step")
+
+    plt.title(f'[VERIFICATION] Final Wealth Distribution (Log Scale), R = {rate}', fontsize=16)
+    plt.xlabel('Riqueza', fontsize=12)
+    plt.ylabel('Número de Agentes (Count)', fontsize=12)
+    plt.legend()
+    plt.tight_layout()
+    plt.savefig(os.path.join(OUTPUT_DIR_PLOTS, f"VERIFICATION_LOG_FinalWealthHistogram_R_{rate}.png"))
+    plt.close()
+    print(f"  > Saved VERIFICATION Log plot to: VERIFICATION_LOG_FinalWealthHistogram_R_{rate}.png")
+
+    # --- Plot 2: Linear Scale (The one that was correct) ---
+    plt.figure(figsize=(14, 8))
+    
+    for i, exp_name in enumerate(experiments):
+        exp_data = data_to_plot[data_to_plot['Experiment'] == exp_name]
+        label = f'Final (t={SIMULATION_STEPS}): {exp_name}'
+        sns.histplot(data=exp_data, x='Wealth', color=colors[i], 
+                     alpha=0.5, log_scale=False, label=label, 
+                     element="step")
+
+    plt.title(f'[VERIFICATION] Final Wealth Distribution (Linear Scale), R = {rate}', fontsize=16)
+    plt.xlabel('Riqueza', fontsize=12)
+    plt.ylabel('Número de Agentes (Count)', fontsize=12)
+    plt.legend()
+    plt.tight_layout()
+    plt.savefig(os.path.join(OUTPUT_DIR_PLOTS, f"VERIFICATION_LINEAR_FinalWealthHistogram_R_{rate}.png"))
+    plt.close()
+    print(f"  > Saved VERIFICATION Linear plot to: VERIFICATION_LINEAR_FinalWealthHistogram_R_{rate}.png")
 
 def perform_statistical_analysis(data, metric, rate):
-    print(f"\n--- Statistical Analysis for '{metric}' at R={rate} (Console Output) ---")
+    print(f"\n--- Análisis Estadístico para '{metric}' en R={rate} (Salida en Consola) ---")
     final_step_data = data[(data['Rate'] == rate) & (data['Step'] == SIMULATION_STEPS - 1)]
     experiments = final_step_data['Experiment'].unique()
     if len(experiments) < 2:
-        print(f"  > Only one experiment group found. Skipping tests.")
+        print(f"  > Solo se encontró un grupo experimental. Omitiendo pruebas.")
         return
     if 'baseline' not in experiments:
-        print("  > Baseline experiment not found. Skipping t-tests.")
+        print("  > Experimento 'baseline' no encontrado. Omitiendo pruebas t.")
         return
     baseline_data = final_step_data[final_step_data['Experiment'] == 'baseline'][metric]
     grouped_data = [final_step_data[final_step_data['Experiment'] == exp][metric] for exp in experiments]
     f_val, p_val_anova = stats.f_oneway(*grouped_data)
-    print(f"One-Way ANOVA result: F-statistic = {f_val:.4f}, p-value = {p_val_anova:.4f}")
+    print(f"Resultado ANOVA de una vía: Estadístico F = {f_val:.4f}, valor p = {p_val_anova:.4f}")
     if p_val_anova < 0.05:
-        print("ANOVA is significant. Performing t-tests against baseline...")
+        print("ANOVA es significativo. Realizando pruebas t post-hoc contra el baseline...")
         for exp in experiments:
             if exp != 'baseline':
                 exp_data = final_step_data[final_step_data['Experiment'] == exp][metric]
                 t_stat, p_val_ttest = stats.ttest_ind(exp_data, baseline_data, equal_var=False)
-                significance = "SIGNIFICANT" if p_val_ttest < 0.05 else "not significant"
-                print(f"  - T-test '{exp}' vs 'baseline': p-value = {p_val_ttest:.4f} ({significance})")
+                significance = "SIGNIFICATIVO" if p_val_ttest < 0.05 else "no significativo"
+                print(f"  - Prueba t '{exp}' vs 'baseline': valor p = {p_val_ttest:.4f} ({significance})")
     else:
-        print("ANOVA is not significant.")
+        print("ANOVA no es significativo.")
 
 # =============================================================================
 # --- 5. MAIN EXECUTION BLOCK ---
@@ -399,6 +490,31 @@ if __name__ == "__main__":
         model_data, agent_data = load_and_aggregate_data(OUTPUT_DIR_CSV)
         model_data.to_csv(agg_model_path, index=False)
         agent_data.to_csv(agg_agent_path, index=False)
+    try:
+        print(f"\n--- Exporting final step wealth for verification... ---")
+        # Use the constant defined at the top of the script
+        final_step_number = SIMULATION_STEPS - 1 
+        
+        # Filter for the final step
+        final_wealth_df = agent_data[agent_data['Step'] == final_step_number].copy()
+        
+        # Define the output path
+        verification_path = os.path.join(OUTPUT_DIR_TABLES, "VERIFICATION_final_step_agent_wealth.csv")
+        
+        # Select relevant columns (now including AgentID) and save
+        columns_to_save = ['Experiment', 'Rate', 'Replication', 'AgentID', 'Wealth']
+        
+        # Ensure all columns exist before trying to save
+        final_wealth_df_to_save = final_wealth_df[columns_to_save]
+        final_wealth_df_to_save.to_csv(verification_path, index=False, float_format='%.5f')
+        
+        print(f"  > Successfully saved verification file to: {verification_path}")
+
+    except Exception as e:
+        print(f"  > FAILED to export verification file. Error: {e}")
+        print("  > This might be because 'AgentID' is still not found.")
+        print("  > Make sure you deleted the old cache files first.")
+    
 
     if EXPERIMENTS_TO_PLOT:
         print(f"\n--- Filtering data to include only: {EXPERIMENTS_TO_PLOT} ---")
@@ -429,9 +545,9 @@ if __name__ == "__main__":
             plot_final_distribution(model_data, metric, interest_rate)
             perform_statistical_analysis(model_data, metric, interest_rate)
 
-        # --- CALLS TO THE RE-ADDED PLOTTING FUNCTIONS ---
         plot_wealth_by_profile(agent_data, interest_rate)
         plot_final_wealth_distribution_histogram(agent_data, interest_rate)
         plot_final_wealth_distribution_linear(agent_data, interest_rate)
+        plot_verification_histograms(interest_rate)
 
     print("\n--- Analysis complete. All plots and tables saved. ---")
