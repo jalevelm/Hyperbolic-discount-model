@@ -323,6 +323,24 @@ def plot_wealth_by_profile(agent_data, rate):
     plt.close()
     print(f"  > Saved agent wealth by profile plot for R={rate}")
 
+def plot_beta_by_profile(agent_data, rate):
+    """
+    Plots the average Beta over time, with one line per agent 'Original_Profile'.
+    """
+    plt.figure(figsize=(14, 8))
+    data_subset = agent_data[agent_data['Rate'] == rate]
+    # Plot Beta over time, with one line per Original_Profile
+    # Use 'Experiment' to create different styles (e.g., solid vs. dashed)
+    sns.lineplot(data=data_subset, x='Step', y='Beta', hue='Original_Profile', style='Experiment')
+    plt.title(f'Trayectoria de Beta Promedio por Perfil de Agente (R = {rate})', fontsize=16)
+    plt.xlabel('Paso de Simulación', fontsize=12)
+    plt.ylabel('Beta Promedio', fontsize=12)
+    plt.legend(title='Perfil de Agente y Experimento')
+    plt.grid(True, which="both", ls="--")
+    plt.savefig(os.path.join(OUTPUT_DIR_PLOTS, f"PHASE2_3_BetaByProfile_R_{rate}.png"))
+    plt.close()
+    print(f"  > Saved agent beta by profile plot for R={rate}")
+
 def plot_final_wealth_distribution_histogram(agent_data, rate):
     final_step_agent_data = agent_data[(agent_data['Rate'] == rate) & (agent_data['Step'] == SIMULATION_STEPS - 1)]
     initial_step_agent_data = agent_data[(agent_data['Rate'] == rate) & (agent_data['Step'] == 0)]
@@ -546,6 +564,7 @@ if __name__ == "__main__":
             perform_statistical_analysis(model_data, metric, interest_rate)
 
         plot_wealth_by_profile(agent_data, interest_rate)
+        plot_beta_by_profile(agent_data, interest_rate)
         plot_final_wealth_distribution_histogram(agent_data, interest_rate)
         plot_final_wealth_distribution_linear(agent_data, interest_rate)
         plot_verification_histograms(interest_rate)
