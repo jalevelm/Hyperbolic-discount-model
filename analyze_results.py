@@ -228,11 +228,27 @@ def generate_statistical_table(model_data, agent_data, rate):
                 continue
 
             if data_source == 'model':
-                group1 = final_model_data[final_model_data['Experiment'] == exp][col_name]
-                group2 = baseline_model_final[col_name]
+                group1_data = final_model_data[final_model_data['Experiment'] == exp]
+                group2_data = baseline_model_final
+                
+                # Find the replications present for the (potentially) smaller experiment
+                available_reps = group1_data['Replication'].unique()
+                
+                group1 = group1_data[col_name]
+                # Filter baseline data to only include reps present in group1
+                group2 = group2_data[group2_data['Replication'].isin(available_reps)][col_name]
             else:
-                group1 = final_agent_data[final_agent_data['Experiment'] == exp].groupby('Replication')[col_name].mean()
-                group2 = baseline_agent_final.groupby('Replication')[col_name].mean()
+                group1_data = final_agent_data[final_agent_data['Experiment'] == exp]
+                group2_data = baseline_agent_final
+                
+                # Find the replications present for the (potentially) smaller experiment
+                available_reps = group1_data['Replication'].unique()
+                
+                group1 = group1_data.groupby('Replication')[col_name].mean()
+                # Filter baseline data to only include reps present in group1
+                group2_data_filtered = group2_data[group2_data['Replication'].isin(available_reps)]
+                group2 = group2_data_filtered.groupby('Replication')[col_name].mean()
+            
 
             t_stat, p_val = stats.ttest_ind(group1, group2, equal_var=False, nan_policy='omit')
             stat_results.append({
@@ -342,8 +358,27 @@ def plot_beta_by_profile(agent_data, rate):
     print(f"  > Saved agent beta by profile plot for R={rate}")
 
 def plot_final_wealth_distribution_histogram(agent_data, rate):
-    final_step_agent_data = agent_data[(agent_data['Rate'] == rate) & (agent_data['Step'] == SIMULATION_STEPS - 1)]
-    initial_step_agent_data = agent_data[(agent_data['Rate'] == rate) & (agent_data['Step'] == 0)]
+    final_step_agent_data = agent_data[(agent_data['Rate'] == rate) & (agent_data['Step'] == SIMULATION_STEPS - 1)].copy()
+    initial_step_agent_data = agent_data[(agent_data['Rate'] == rate) & (agent_data['Step'] == 0)].copy()
+
+    experiments = final_step_agent_data['Experiment'].unique()
+    matching_reps = None
+
+    if 'baseline' in experiments:
+        non_baseline_data = final_step_agent_data[final_step_agent_data['Experiment'] != 'baseline']
+        if not non_baseline_data.empty:
+            # Find the experiment with the minimum number of replications
+            rep_counts = non_baseline_data.groupby('Experiment')['Replication'].nunique()
+            min_reps_exp = rep_counts.idxmin()
+            min_reps_n = rep_counts.min()
+            # Get the list of replication numbers from that experiment
+            matching_reps = non_baseline_data[non_baseline_data['Experiment'] == min_reps_exp]['Replication'].unique()
+            
+            print(f"  > HISTOGRAM PLOT: Matching replications for fair comparison, N={min_reps_n} (from '{min_reps_exp}')")
+            
+            # Filter all data (initial and final) to only these replications
+            final_step_agent_data = final_step_agent_data[final_step_agent_data['Replication'].isin(matching_reps)]
+            initial_step_agent_data = initial_step_agent_data[initial_step_agent_data['Replication'].isin(matching_reps)]
 
     FLOOR_VALUE = 1e-2
     initial_step_agent_data['Wealth'] = np.clip(initial_step_agent_data['Wealth'], a_min=FLOOR_VALUE, a_max=None)
