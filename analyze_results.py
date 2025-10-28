@@ -30,7 +30,13 @@ palette = sns.color_palette("viridis", 5)
 # --- Analysis Configuration ---
 GENERATE_PHASE_1_PLOTS = False
 # Example: Plotting baseline
-EXPERIMENTS_TO_PLOT = ["baseline", "info_diffusion_only"] 
+EXPERIMENTS_TO_PLOT = ["baseline", "all_interactions"] 
+
+# --- NEW CONFIGURATION ---
+# Specify which interest rates to analyze.
+# An empty list [] means "analyze all rates found in the data."
+# Example: [1.05] or [1.05, 1.12]
+RATES_TO_PROCESS = [] 
 
 # =============================================================================
 # --- 2. DATA LOADING AND AGGREGATION ---
@@ -460,7 +466,7 @@ def plot_final_wealth_distribution_barplot(agent_data, rate, log_scale=True):
         
         # Define bin edges as powers of 10
         bin_edges = np.power(10.0, np.arange(-2, 7)) 
-        bin_labels = [f"$10^{{{i}}}$ - $10^{{{i+1}}}$" for i in range(-2, 6)]
+        bin_labels = [f"$10^{{{i}}}$ a $10^{{{i+1}}}$" for i in range(-2, 6)]
         bin_order = bin_labels # Use these labels for order
         
         # Bin FINAL data
@@ -769,7 +775,7 @@ def plot_verification_barplots(rate):
             plot_filename_suffix = "LOG"
             
             bin_edges = np.power(10.0, np.arange(-2, 7)) 
-            bin_labels = [f"$10^{{{i}}}$ - $10^{{{i+1}}}$" for i in range(-2, 6)]
+            bin_labels = [f"$10^{{{i}}}$ a $10^{{{i+1}}}$" for i in range(-2, 6)]
             bin_order = bin_labels
             
             # Bin FINAL data
@@ -1012,7 +1018,33 @@ if __name__ == "__main__":
     else:
         print("\n--- Skipping Phase 1 VFI Validation Plots as per configuration. ---")
 
-    for interest_rate in sorted(model_data['Rate'].unique()):
+    # --- START OF MODIFIED SECTION ---
+    
+    # --- Determine which interest rates to process based on config ---
+    all_available_rates = sorted(model_data['Rate'].unique())
+    
+    rates_to_iterate = []
+    if not RATES_TO_PROCESS:
+        rates_to_iterate = all_available_rates
+        print(f"\n--- No specific rates selected. Analyzing all found rates: {rates_to_iterate} ---")
+    else:
+        # Filter the user's list to only include rates that actually exist in the data
+        rates_to_iterate = [r for r in RATES_TO_PROCESS if r in all_available_rates]
+        
+        # Warn the user if they specified rates that weren't found
+        missing_rates = [r for r in RATES_TO_PROCESS if r not in all_available_rates]
+        if missing_rates:
+            print(f"\n--- Warning: Could not find data for specified rates: {missing_rates} ---")
+        
+        print(f"\n--- Analyzing user-specified rates: {rates_to_iterate} ---")
+
+    if not rates_to_iterate:
+            print("\n--- No data found for any of the specified rates. Exiting analysis. ---")
+
+    # --- Main analysis loop ---
+    for interest_rate in rates_to_iterate:
+    # --- END OF MODIFIED SECTION ---
+    
         print(f"\n{'='*25} ANALYZING RESULTS FOR R = {interest_rate} {'='*25}")
         
         rate_model_data = model_data[model_data['Rate'] == interest_rate].copy()
