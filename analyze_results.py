@@ -30,13 +30,8 @@ palette = sns.color_palette("viridis", 5)
 # --- Analysis Configuration ---
 GENERATE_PHASE_1_PLOTS = False
 # Example: Plotting baseline
-EXPERIMENTS_TO_PLOT = ["baseline", "all_interactions"] 
-
-# --- NEW CONFIGURATION ---
-# Specify which interest rates to analyze.
-# An empty list [] means "analyze all rates found in the data."
-# Example: [1.05] or [1.05, 1.12]
-RATES_TO_PROCESS = [] 
+EXPERIMENTS_TO_PLOT = ["baseline", "social_norms_only"] 
+RATES_TO_PROCESS = [1.12] 
 
 # =============================================================================
 # --- 2. DATA LOADING AND AGGREGATION ---
@@ -464,9 +459,12 @@ def plot_final_wealth_distribution_barplot(agent_data, rate, log_scale=True):
         plot_title_suffix = '(Escala Log)'
         plot_filename_suffix = "LOG"
         
-        # Define bin edges as powers of 10
-        bin_edges = np.power(10.0, np.arange(-2, 7)) 
-        bin_labels = [f"$10^{{{i}}}$ a $10^{{{i+1}}}$" for i in range(-2, 6)]
+        # --- FIX HERE ---
+        # Define bin edges as powers of 10, extending to 10^7 to catch the 10^6+ values
+        bin_edges = np.power(10.0, np.arange(-2, 8)) # Changed from 7 to 8
+        bin_labels = [f"$10^{{{i}}}$ a $10^{{{i+1}}}$" for i in range(-2, 7)] # Changed from 6 to 7
+        # --- END FIX ---
+        
         bin_order = bin_labels # Use these labels for order
         
         # Bin FINAL data
@@ -625,7 +623,6 @@ def plot_final_wealth_distribution_barplot(agent_data, rate, log_scale=True):
     plt.close()
     print(f"  > Saved final agent wealth bar plot ({plot_filename_suffix} scale) to: {filename}")
 
-
 def plot_final_consumption_distribution_barplot(agent_data, rate):
     """
     Plots the average distribution of final consumption as a bar plot with confidence bands.
@@ -653,8 +650,11 @@ def plot_final_consumption_distribution_barplot(agent_data, rate):
     final_step_agent_data['Consumption'] = np.clip(final_step_agent_data['Consumption'], a_min=FLOOR_VALUE, a_max=None)
 
     # 4. Binning Strategy
-    bin_edges = np.power(10.0, np.arange(-2, 7)) 
-    bin_labels = [f"$10^{{{i}}}$ - $10^{{{i+1}}}$" for i in range(-2, 6)]
+    # --- FIX HERE ---
+    bin_edges = np.power(10.0, np.arange(-2, 8)) # Changed from 7 to 8
+    bin_labels = [f"$10^{{{i}}}$ - $10^{{{i+1}}}$" for i in range(-2, 7)] # Changed from 6 to 7
+    # --- END FIX ---
+    
     bin_order = bin_labels # Use for ordering x-axis
     
     binned_data_all_reps = []
@@ -703,7 +703,6 @@ def plot_final_consumption_distribution_barplot(agent_data, rate):
     plt.savefig(os.path.join(OUTPUT_DIR_PLOTS, filename))
     plt.close()
     print(f"  > Saved final agent consumption bar plot (log scale) to: {filename}")
-
 
 def plot_verification_barplots(rate):
     """
@@ -774,8 +773,11 @@ def plot_verification_barplots(rate):
             plot_title_suffix = '(Escala Log)'
             plot_filename_suffix = "LOG"
             
-            bin_edges = np.power(10.0, np.arange(-2, 7)) 
-            bin_labels = [f"$10^{{{i}}}$ a $10^{{{i+1}}}$" for i in range(-2, 6)]
+            # --- FIX HERE ---
+            bin_edges = np.power(10.0, np.arange(-2, 8)) # Changed from 7 to 8
+            bin_labels = [f"$10^{{{i}}}$ a $10^{{{i+1}}}$" for i in range(-2, 7)] # Changed from 6 to 7
+            # --- END FIX ---
+            
             bin_order = bin_labels
             
             # Bin FINAL data
@@ -931,8 +933,6 @@ def plot_verification_barplots(rate):
         plt.savefig(os.path.join(OUTPUT_DIR_PLOTS, filename))
         plt.close()
         print(f"  > Saved VERIFICATION Avg. Dist. Barplot ({plot_filename_suffix} scale) to: {filename}")
-
-# --- END OF MODIFIED SECTION ---
 
 def perform_statistical_analysis(data, metric, rate):
     print(f"\n--- Análisis Estadístico para '{metric}' en R={rate} (Salida en Consola) ---")
