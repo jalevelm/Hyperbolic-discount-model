@@ -15,3 +15,4 @@ output_text/
 output_plots/
 
 replication_verif.py
+vfi_vis.py
