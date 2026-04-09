@@ -13,6 +13,7 @@ __pycache__/
 output_csv/
 output_text/
 output_plots/
+output_tables/
 
 replication_verif.py
 vfi_vis.py

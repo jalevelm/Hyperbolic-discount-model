@@ -5,7 +5,8 @@ import os
 import numpy as np
 import re
 from scipy import stats
-from matplotlib.patches import Patch # Needed for manual legend entry
+from matplotlib.patches import Patch 
+import pingouin as pg
 
 # =============================================================================
 # --- 1. SETUP & CONFIGURATION ---
@@ -18,7 +19,7 @@ V_G_DIR = os.path.join(OUTPUT_DIR_CSV, "v_g_functions")
 os.makedirs(OUTPUT_DIR_PLOTS, exist_ok=True)
 os.makedirs(OUTPUT_DIR_TABLES, exist_ok=True)
 
-# --- Constants from your experimental design ---
+# --- Constants from experimental design ---
 NUM_REPLICATIONS = 30
 SIMULATION_STEPS = 200
 NUM_WEALTH_POINTS = 1000
@@ -29,8 +30,8 @@ palette = sns.color_palette("viridis", 5)
 
 # --- Analysis Configuration ---
 GENERATE_PHASE_1_PLOTS = False
-# Example: Plotting baseline
-EXPERIMENTS_TO_PLOT = ["baseline", "social_norms_only"] 
+GENERATE_PLOTS = False
+EXPERIMENTS_TO_PLOT = ["baseline", "info_diffusion_only", "peer_comparison_only", "social_norms_only", "all_interactions"] 
 RATES_TO_PROCESS = [1.12] 
 
 # =============================================================================
@@ -166,8 +167,7 @@ def generate_summary_table(model_data, agent_data, rate):
 
 def generate_statistical_table(model_data, agent_data, rate):
     """
-    Generates the standardized statistical table with an F-statistic column,
-    N/A for irrelevant Beta tests, and scientific notation for p-values.
+    Generates the standardized statistical table using Welch's ANOVA and Games-Howell post-hoc.
     """
     print(f"--- Generating Standardized Statistical Table for R = {rate} ---")
     model_rate_data = model_data[model_data['Rate'] == rate]
@@ -181,11 +181,7 @@ def generate_statistical_table(model_data, agent_data, rate):
         print("  > Baseline data not found for this rate. Skipping statistical table.")
         return
 
-    baseline_model_final = final_model_data[final_model_data['Experiment'] == 'baseline']
-    baseline_agent_final = final_agent_data[final_agent_data['Experiment'] == 'baseline']
-    
     stat_results = []
-    
     experiments_to_compare = [exp for exp in sorted(final_model_data['Experiment'].unique()) if exp != 'baseline']
     all_experiments = sorted(final_model_data['Experiment'].unique())
 
@@ -199,77 +195,86 @@ def generate_statistical_table(model_data, agent_data, rate):
 
     for metric_name, (data_source, col_name) in metrics_to_test.items():
         f_stat = 'N/A'
+        p_anova = 'N/A'
         beta_modifying_experiments = {'social_norms_only', 'all_interactions'}
         
         is_beta_metric_and_relevant = (metric_name == 'Final Avg. Beta' and any(exp in beta_modifying_experiments for exp in all_experiments))
         is_not_beta_metric = metric_name != 'Final Avg. Beta'
 
+        if data_source == 'model':
+            df_metric = final_model_data[['Experiment', col_name]].copy()
+            df_metric = df_metric[df_metric['Experiment'].isin(all_experiments)]
+        else:
+            df_ag = final_agent_data[final_agent_data['Experiment'].isin(all_experiments)]
+            df_metric = df_ag.groupby(['Experiment', 'Replication'])[col_name].mean().reset_index()
+
+        posthoc = None
+
         if is_not_beta_metric or is_beta_metric_and_relevant:
-            grouped_data_for_anova = []
-            if data_source == 'model':
-                for exp in all_experiments:
-                    grouped_data_for_anova.append(final_model_data[final_model_data['Experiment'] == exp][col_name])
-            else:
-                for exp in all_experiments:
-                    grouped_data_for_anova.append(final_agent_data[final_agent_data['Experiment'] == exp].groupby('Replication')[col_name].mean())
-            
-            if len(grouped_data_for_anova) > 1:
-                with np.testing.suppress_warnings() as sup:
-                    sup.filter(RuntimeWarning)
-                    f_stat, _ = stats.f_oneway(*grouped_data_for_anova)
+            if len(all_experiments) > 1:
+                # Ruido mayor (1e-4) para evitar pérdida por precisión de punto flotante
+                df_metric[col_name] = df_metric[col_name].astype(float) + np.random.uniform(-1e-4, 1e-4, size=len(df_metric))
+                
+                try:
+                    # Nombres de columna fijos extraídos de tu versión de pingouin
+                    anova_res = pg.welch_anova(dv=col_name, between='Experiment', data=df_metric)
+                    f_stat = anova_res['F'].iloc[0]
+                    p_anova = anova_res['p_unc'].iloc[0]
+                    
+                    if p_anova < 0.05:
+                        posthoc = pg.pairwise_gameshowell(dv=col_name, between='Experiment', data=df_metric)
+                except Exception as e:
+                    print(f"  > Advertencia: No se pudo calcular ANOVA/Games-Howell para {metric_name}. Motivo: {e}")
 
         for exp in experiments_to_compare:
+            # Regla de exclusión para métricas de Beta en mecanismos que no lo alteran
             if metric_name == 'Final Avg. Beta' and exp not in beta_modifying_experiments:
                 stat_results.append({
                     'Metric Tested': metric_name,
                     'Experiment Comparison': f"{exp} vs. Baseline",
-                    'F-statistic': f_stat,
-                    't-statistic': 'N/A',
+                    'F-statistic (Welch)': f_stat,
+                    't-statistic (Games-Howell)': 'N/A',
                     'p-value': 'N/A',
                     'Significant (p < 0.05)?': 'N/A'
                 })
                 continue
 
-            if data_source == 'model':
-                group1_data = final_model_data[final_model_data['Experiment'] == exp]
-                group2_data = baseline_model_final
-                
-                # Find the replications present for the (potentially) smaller experiment
-                available_reps = group1_data['Replication'].unique()
-                
-                group1 = group1_data[col_name]
-                # Filter baseline data to only include reps present in group1
-                group2 = group2_data[group2_data['Replication'].isin(available_reps)][col_name]
-            else:
-                group1_data = final_agent_data[final_agent_data['Experiment'] == exp]
-                group2_data = baseline_agent_final
-                
-                # Find the replications present for the (potentially) smaller experiment
-                available_reps = group1_data['Replication'].unique()
-                
-                group1 = group1_data.groupby('Replication')[col_name].mean()
-                # Filter baseline data to only include reps present in group1
-                group2_data_filtered = group2_data[group2_data['Replication'].isin(available_reps)]
-                group2 = group2_data_filtered.groupby('Replication')[col_name].mean()
-            
+            t_stat_gh = 'N/A'
+            p_val_gh = 'N/A'
+            is_sig = 'No'
 
-            t_stat, p_val = stats.ttest_ind(group1, group2, equal_var=False, nan_policy='omit')
+            if posthoc is not None and not posthoc.empty:
+                # Filtrar la comparación específica
+                match = posthoc[((posthoc['A'] == exp) & (posthoc['B'] == 'baseline')) | 
+                                ((posthoc['A'] == 'baseline') & (posthoc['B'] == exp))]
+                
+                if not match.empty:
+                    # Nombres de columna fijos extraídos de tu versión de pingouin
+                    t_stat_gh = match['T'].iloc[0]
+                    if match['A'].iloc[0] == 'baseline':
+                        t_stat_gh = -t_stat_gh  # Ajustar signo si el orden se invierte
+
+                    p_val_gh = match['pval'].iloc[0]
+                    is_sig = 'Yes' if p_val_gh < 0.05 else 'No'
+            elif p_anova != 'N/A' and p_anova >= 0.05:
+                p_val_gh = '> 0.05 (ns ANOVA)'
+
             stat_results.append({
                 'Metric Tested': metric_name,
                 'Experiment Comparison': f"{exp} vs. Baseline",
-                'F-statistic': f_stat,
-                't-statistic': t_stat,
-                'p-value': p_val,
-                'Significant (p < 0.05)?': 'Yes' if p_val < 0.05 else 'No'
+                'F-statistic (Welch)': f_stat,
+                't-statistic (Games-Howell)': t_stat_gh,
+                'p-value': p_val_gh,
+                'Significant (p < 0.05)?': is_sig
             })
 
     stats_df = pd.DataFrame(stat_results)
     if not stats_df.empty:
-        stats_df = stats_df[['Metric Tested', 'Experiment Comparison', 'F-statistic', 't-statistic', 'p-value', 'Significant (p < 0.05)?']]
+        stats_df = stats_df[['Metric Tested', 'Experiment Comparison', 'F-statistic (Welch)', 't-statistic (Games-Howell)', 'p-value', 'Significant (p < 0.05)?']]
     
     filename = os.path.join(OUTPUT_DIR_TABLES, f"Table_Statistical_Significance_R_{rate}.csv")
     stats_df.to_csv(filename, index=False, float_format='%.4e')
-    print(f"  > Saved standardized statistical table with F-statistic to: {filename}")
+    print(f"  > Saved standardized statistical table with Welch F-statistic to: {filename}")
 
 
 # =============================================================================
@@ -935,29 +940,56 @@ def plot_verification_barplots(rate):
         print(f"  > Saved VERIFICATION Avg. Dist. Barplot ({plot_filename_suffix} scale) to: {filename}")
 
 def perform_statistical_analysis(data, metric, rate):
-    print(f"\n--- Análisis Estadístico para '{metric}' en R={rate} (Salida en Consola) ---")
+    print(f"\n--- Análisis Estadístico (Welch + Games-Howell) para '{metric}' en R={rate} (Salida en Consola) ---")
     final_step_data = data[(data['Rate'] == rate) & (data['Step'] == SIMULATION_STEPS - 1)]
     experiments = final_step_data['Experiment'].unique()
+    
     if len(experiments) < 2:
         print(f"  > Solo se encontró un grupo experimental. Omitiendo pruebas.")
         return
     if 'baseline' not in experiments:
-        print("  > Experimento 'baseline' no encontrado. Omitiendo pruebas t.")
+        print("  > Experimento 'baseline' no encontrado. Omitiendo pruebas post-hoc.")
         return
-    baseline_data = final_step_data[final_step_data['Experiment'] == 'baseline'][metric]
-    grouped_data = [final_step_data[final_step_data['Experiment'] == exp][metric] for exp in experiments]
-    f_val, p_val_anova = stats.f_oneway(*grouped_data)
-    print(f"Resultado ANOVA de una vía: Estadístico F = {f_val:.4f}, valor p = {p_val_anova:.4f}")
-    if p_val_anova < 0.05:
-        print("ANOVA es significativo. Realizando pruebas t post-hoc contra el baseline...")
-        for exp in experiments:
-            if exp != 'baseline':
-                exp_data = final_step_data[final_step_data['Experiment'] == exp][metric]
-                t_stat, p_val_ttest = stats.ttest_ind(exp_data, baseline_data, equal_var=False)
-                significance = "SIGNIFICATIVO" if p_val_ttest < 0.05 else "no significativo"
-                print(f"  - Prueba t '{exp}' vs 'baseline': valor p = {p_val_ttest:.4f} ({significance})")
-    else:
-        print("ANOVA no es significativo.")
+        
+    df_metric = final_step_data[['Experiment', metric]].copy().dropna()
+    
+    df_metric[metric] = df_metric[metric].astype(float) + np.random.uniform(-1e-4, 1e-4, size=len(df_metric))
+    
+    try:
+        anova_res = pg.welch_anova(dv=metric, between='Experiment', data=df_metric)
+        
+        f_cols = [c for c in anova_res.columns if c.lower() in ['f', 'f-val', 'fval']]
+        f_val = anova_res[f_cols[0]].iloc[0] if f_cols else 'N/A'
+        
+        p_cols = [c for c in anova_res.columns if c.lower() in ['p_unc', 'p-unc', 'p-val', 'pval', 'pvalue', 'p', 'pr(>f)']]
+        if not p_cols:
+            print(f"DEBUG: No se reconoció la columna P. Columnas de pingouin: {anova_res.columns.tolist()}")
+            return
+            
+        p_val_anova = anova_res[p_cols[0]].iloc[0]
+        
+        f_val_str = f"{f_val:.4f}" if isinstance(f_val, (int, float)) else f_val
+        print(f"Resultado ANOVA de Welch: Estadístico F = {f_val_str}, valor p = {p_val_anova:.4e}")
+        
+        if p_val_anova < 0.05:
+            print("El ANOVA de Welch es significativo. Realizando post-hoc de Games-Howell contra el baseline...")
+            posthoc = pg.pairwise_gameshowell(dv=metric, between='Experiment', data=df_metric)
+            
+            for exp in experiments:
+                if exp != 'baseline':
+                    match = posthoc[((posthoc['A'] == exp) & (posthoc['B'] == 'baseline')) | 
+                                    ((posthoc['A'] == 'baseline') & (posthoc['B'] == exp))]
+                    if not match.empty:
+                        p_cols_gh = [c for c in match.columns if c.lower() in ['p_unc', 'p-unc', 'pval', 'p-val', 'pvalue', 'p']]
+                        if p_cols_gh:
+                            p_val_gh = match[p_cols_gh[0]].iloc[0]
+                            significance = "SIGNIFICATIVO" if p_val_gh < 0.05 else "no significativo"
+                            print(f"  - Games-Howell '{exp}' vs 'baseline': valor p = {p_val_gh:.4e} ({significance})")
+        else:
+            print("El ANOVA de Welch no es significativo. No proceden pruebas post-hoc.")
+            
+    except Exception as e:
+        print(f"Error realizando el análisis estadístico para {metric}: {e}")
 
 # =============================================================================
 # --- 5. MAIN EXECUTION BLOCK ---
@@ -1043,14 +1075,13 @@ if __name__ == "__main__":
 
     # --- Main analysis loop ---
     for interest_rate in rates_to_iterate:
-    # --- END OF MODIFIED SECTION ---
     
         print(f"\n{'='*25} ANALYZING RESULTS FOR R = {interest_rate} {'='*25}")
         
         rate_model_data = model_data[model_data['Rate'] == interest_rate].copy()
         rate_agent_data = agent_data[agent_data['Rate'] == interest_rate].copy()
 
-        # Check if we have data after filtering for the rate
+        # Check if there is data after filtering for the rate
         if rate_model_data.empty or rate_agent_data.empty:
             print(f"  > No data found for R = {interest_rate}. Skipping analysis for this rate.")
             continue
@@ -1058,26 +1089,28 @@ if __name__ == "__main__":
         generate_summary_table(rate_model_data, rate_agent_data, interest_rate) 
         generate_statistical_table(rate_model_data, rate_agent_data, interest_rate)
         
-        print(f"\n--- Generating Plots for R = {interest_rate} ---")
+        print(f"\n--- Ejecutando análisis estadístico en consola para R = {interest_rate} ---")
         model_metrics_to_plot = ["Average Wealth", "Gini_Coefficient", "Average Consumption", "Average Savings"]
         for metric in model_metrics_to_plot:
-            plot_time_series_comparison(rate_model_data, metric, interest_rate)
-            plot_final_distribution(rate_model_data, metric, interest_rate)
             perform_statistical_analysis(rate_model_data, metric, interest_rate)
 
-        plot_wealth_by_profile(rate_agent_data, interest_rate)
-        plot_beta_by_profile(rate_agent_data, interest_rate)
+        # Condicionar generación de gráficas
+        if GENERATE_PLOTS:
+            print(f"\n--- Generating Plots for R = {interest_rate} ---")
+            for metric in model_metrics_to_plot:
+                plot_time_series_comparison(rate_model_data, metric, interest_rate)
+                plot_final_distribution(rate_model_data, metric, interest_rate)
 
-        # --- MODIFIED MAIN CALLS ---
-        # Call the new barplot function for both log and linear scales
-        plot_final_wealth_distribution_barplot(rate_agent_data, interest_rate, log_scale=True)
-        plot_final_wealth_distribution_barplot(rate_agent_data, interest_rate, log_scale=False)
-        
-        # Call the new consumption distribution barplot
-        plot_final_consumption_distribution_barplot(rate_agent_data, interest_rate)
-        
-        # Call the modified verification plot function
-        plot_verification_barplots(interest_rate) 
-        # --- END OF MODIFIED MAIN CALLS ---
+            plot_wealth_by_profile(rate_agent_data, interest_rate)
+            plot_beta_by_profile(rate_agent_data, interest_rate)
 
-    print("\n--- Analysis complete. All plots and tables saved. ---")
+            plot_final_wealth_distribution_barplot(rate_agent_data, interest_rate, log_scale=True)
+            plot_final_wealth_distribution_barplot(rate_agent_data, interest_rate, log_scale=False)
+            
+            plot_final_consumption_distribution_barplot(rate_agent_data, interest_rate)
+            
+            plot_verification_barplots(interest_rate) 
+        else:
+            print(f"\n--- Omitiendo generación de gráficas para R = {interest_rate} (GENERATE_PLOTS = False) ---")
+
+    print("\n========================= ANALYSIS COMPLETE =========================")
