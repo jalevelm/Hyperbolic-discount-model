@@ -30,9 +30,9 @@ palette = sns.color_palette("viridis", 5)
 
 # --- Analysis Configuration ---
 GENERATE_PHASE_1_PLOTS = False
-GENERATE_PLOTS = False
+GENERATE_PLOTS = True
 EXPERIMENTS_TO_PLOT = ["baseline", "info_diffusion_only", "peer_comparison_only", "social_norms_only", "all_interactions"] 
-RATES_TO_PROCESS = [1.12] 
+RATES_TO_PROCESS = [1.05] 
 
 # =============================================================================
 # --- 2. DATA LOADING AND AGGREGATION ---
@@ -310,42 +310,36 @@ def plot_phase1_validation(v_g_dir, num_wealth_points):
         plt.close()
         print(f"  > Saved LOG-SCALE policy function plot for R={rate}")
 
-def plot_time_series_comparison(data, metric, rate):
-    plt.figure(figsize=(14, 8))
-    
-    # Filter data once
+def plot_time_series_comparison(data, metric, rate, target_ax=None):
+    if target_ax is None:
+        fig, ax = plt.subplots(figsize=(14, 8))
+        save_plot = True
+    else:
+        ax = target_ax
+        save_plot = False
+
     plot_data = data[data['Rate'] == rate]
-    
-    # Check how many unique experiments are in the filtered data
     num_experiments = plot_data['Experiment'].nunique()
     
-
-    if num_experiments >= 5: 
-        palette_to_use = "tab10" 
-        ci_to_use = None # <-- Shading is REMOVED
-        print(f"  > Plotting {num_experiments} experiments: Using 'tab10' palette and no error bands.")
-    
-
+    if num_experiments >= 5:
+        palette_to_use = 'tab10'
+        ci_to_use = None
     else:
-        palette_to_use = "viridis"
-        ci_to_use = "sd" 
-        print(f"  > Plotting {num_experiments} experiments: Using 'viridis' palette with error bands.")
+        palette_to_use = 'viridis'
+        ci_to_use = 'sd'
+        
+    sns.lineplot(data=plot_data, x='Step', y=metric, hue='Experiment', palette=palette_to_use, ci=ci_to_use, ax=ax)
     
-    
-    sns.lineplot(data=plot_data, 
-                 x='Step', 
-                 y=metric, 
-                 hue='Experiment', 
-                 palette=palette_to_use, 
-                 ci=ci_to_use)
+    # Formato APA: Sin título incrustado. Etiquetas descriptivas en los ejes.
+    ax.set_xlabel('Paso de Simulación', fontsize=11)
+    ax.set_ylabel(metric.replace('_', ' '), fontsize=11)
 
-    plt.title(f'{metric.replace("_", " ")} a lo Largo del Tiempo (R = {rate})', fontsize=16)
-    plt.xlabel('Paso de Simulación', fontsize=12)
-    plt.ylabel(metric.replace("_", " "), fontsize=12)
-    plt.legend(title='Experimento')
-    plt.savefig(os.path.join(OUTPUT_DIR_PLOTS, f"PHASE2_3_TimeSeries_{metric}_R_{rate}.png"))
-    plt.close()
-    print(f"  > Saved time-series plot for {metric} at R={rate}")
+    ax.legend(title='Experimento')
+    
+    if save_plot:
+        plt.tight_layout()
+        plt.savefig(os.path.join(OUTPUT_DIR_PLOTS, f'PHASE2_3_TimeSeries_{metric}_R_{rate}.png'))
+        plt.close()
 
 def plot_final_distribution(data, metric, rate):
     final_step_data = data[(data['Rate'] == rate) & (data['Step'] == SIMULATION_STEPS - 1)]
@@ -361,353 +355,296 @@ def plot_final_distribution(data, metric, rate):
     print(f"  > Saved final distribution plot for {metric} at R={rate}")
 
 def plot_wealth_by_profile(agent_data, rate):
-    plt.figure(figsize=(14, 8))
     data_subset = agent_data[agent_data['Rate'] == rate]
-
-    # Check how many unique experiments are in the filtered data
-    num_experiments = data_subset['Experiment'].nunique()
+    experiments = data_subset['Experiment'].unique()
     
-    # Set palette and CI based on the number of experiments
-    if num_experiments >= 2: 
-        palette_to_use = "tab10" # Distinct colors
-        ci_to_use = None # No shading
-        print(f"  > Plotting {num_experiments} experiments: Using 'tab10' palette and no error bands for Wealth-by-Profile.")
-    else:
-        palette_to_use = "viridis" # Original sequential palette
-        ci_to_use = "sd" # Show shading
-        print(f"  > Plotting {num_experiments} experiments: Using 'viridis' palette with error bands for Wealth-by-Profile.")
-
-   
-    sns.lineplot(data=data_subset, 
-                 x='Step', 
-                 y='Wealth', 
-                 hue='Original_Profile',  
-                 style='Experiment', 
-                 palette=palette_to_use, 
-                 ci=ci_to_use)
+    if 'baseline' not in experiments:
+        print("  > No se encontró 'baseline', omitiendo desglose de trayectoria.")
+        return
+        
+    non_baseline = [e for e in experiments if e != 'baseline']
     
-    plt.title(f'Trayectoria de Riqueza Promedio por Perfil de Agente (R = {rate})', fontsize=16)
-    plt.xlabel('Paso de Simulación', fontsize=12)
-    plt.ylabel('Riqueza Promedio', fontsize=12)
-    plt.legend(title='Perfil de Agente y Experimento')
-    plt.grid(True, which="both", ls="--")
-    plt.savefig(os.path.join(OUTPUT_DIR_PLOTS, f"PHASE2_3_WealthByProfile_R_{rate}.png"))
-    plt.close()
-    print(f"  > Saved agent wealth by profile plot for R={rate}")
+    for exp in non_baseline:
+        plt.figure(figsize=(14, 8))
+        
+        exp_data = data_subset[data_subset['Experiment'].isin(['baseline', exp])]
+        
+        sns.lineplot(data=exp_data, 
+                     x='Step', 
+                     y='Wealth', 
+                     hue='Original_Profile',  
+                     style='Experiment', 
+                     palette='tab10', 
+                     ci=None) 
+        
+        plt.xlabel('Paso de Simulación', fontsize=12)
+        plt.ylabel('Riqueza Promedio', fontsize=12)
+        
+        # Movemos la leyenda fuera del cuadro para que no tape las líneas
+        plt.legend(title='Perfil y Experimento', bbox_to_anchor=(1.01, 1), loc='upper left')
+        plt.grid(True, which="both", ls="--")
+        plt.tight_layout()
+        
+        filename = f"PHASE2_3_WealthByProfile_Baseline_vs_{exp}_R_{rate}.png"
+        plt.savefig(os.path.join(OUTPUT_DIR_PLOTS, filename))
+        plt.close()
+        print(f"  > Guardada trayectoria de riqueza: {filename}")
+
 
 def plot_beta_by_profile(agent_data, rate):
-    """
-    Plots the average Beta over time, with one line per agent 'Original_Profile'.
-    """
+    # Lista estricta de experimentos a incluir
+    allowed_exps = ['baseline', 'social_norms_only', 'all_interactions']
+    data_subset = agent_data[(agent_data['Rate'] == rate) & (agent_data['Experiment'].isin(allowed_exps))]
+    
+    if data_subset.empty:
+        print(f"  > No hay datos para los experimentos requeridos en Beta para R={rate}.")
+        return
+        
     plt.figure(figsize=(14, 8))
-    data_subset = agent_data[agent_data['Rate'] == rate]
-    # Plot Beta over time, with one line per Original_Profile
-    # Use 'Experiment' to create different styles (e.g., solid vs. dashed)
-    sns.lineplot(data=data_subset, x='Step', y='Beta', hue='Original_Profile', style='Experiment')
-    plt.title(f'Trayectoria de Beta Promedio por Perfil de Agente (R = {rate})', fontsize=16)
+    sns.lineplot(data=data_subset, x='Step', y='Beta', hue='Original_Profile', style='Experiment', palette='tab10', ci=None)
+    
     plt.xlabel('Paso de Simulación', fontsize=12)
     plt.ylabel('Beta Promedio', fontsize=12)
-    plt.legend(title='Perfil de Agente y Experimento')
+    plt.legend(title='Perfil y Experimento', bbox_to_anchor=(1.01, 1), loc='upper left')
     plt.grid(True, which="both", ls="--")
-    plt.savefig(os.path.join(OUTPUT_DIR_PLOTS, f"PHASE2_3_BetaByProfile_R_{rate}.png"))
+    plt.tight_layout()
+    
+    filename = f"PHASE2_3_BetaByProfile_Filtrado_R_{rate}.png"
+    plt.savefig(os.path.join(OUTPUT_DIR_PLOTS, filename))
     plt.close()
-    print(f"  > Saved agent beta by profile plot for R={rate}")
+    print(f"  > Guardada trayectoria de Beta filtrada para R={rate}")
 
-# --- START OF MODIFIED SECTION ---
 
-def plot_final_wealth_distribution_barplot(agent_data, rate, log_scale=True):
-    """
-    Plots the average distribution of final wealth as a bar plot with confidence bands.
-    Overlays the initial (t=0) distribution as hollow bars with black edges.
-    """
-    # 1. Get final step AND initial step data
+def plot_final_wealth_distribution_barplot(agent_data, rate, log_scale=True, target_ax=None):
     final_step_agent_data = agent_data[(agent_data['Rate'] == rate) & (agent_data['Step'] == SIMULATION_STEPS - 1)].copy()
-
-    # 2. Apply replication matching logic for fair comparison
     experiments = sorted(final_step_agent_data['Experiment'].unique())
     if not experiments:
-        print(f"  > No final-step data found for R={rate}. Skipping plot.")
         return
     
-    initial_step_agent_data = agent_data[
-        (agent_data['Rate'] == rate) & 
-        (agent_data['Step'] == 0) & 
-        (agent_data['Experiment'] == experiments[0]) 
-    ].copy()
+    initial_step_agent_data = agent_data[(agent_data['Rate'] == rate) & (agent_data['Step'] == 0) & (agent_data['Experiment'] == experiments[0])].copy()
 
-    unique_replications = final_step_agent_data['Replication'].unique() # Get all reps *before* filtering
-    matching_reps = None
+    unique_replications = final_step_agent_data['Replication'].unique()
     if 'baseline' in experiments:
-        non_baseline_data = final_step_agent_data[final_step_agent_data['Experiment'] != 'baseline']
-        if not non_baseline_data.empty:
-            rep_counts = non_baseline_data.groupby('Experiment')['Replication'].nunique()
-            min_reps_exp = rep_counts.idxmin()
-            min_reps_n = rep_counts.min()
-            matching_reps = non_baseline_data[non_baseline_data['Experiment'] == min_reps_exp]['Replication'].unique()
-            print(f"  > DISTRIBUTION PLOT (Wealth): Matching replications for fair comparison, N={min_reps_n} (from '{min_reps_exp}')")
-            
-            # Filter BOTH final and initial data to the same reps
+        non_baseline = final_step_agent_data[final_step_agent_data['Experiment'] != 'baseline']
+        if not non_baseline.empty:
+            min_reps_exp = non_baseline.groupby('Experiment')['Replication'].nunique().idxmin()
+            matching_reps = non_baseline[non_baseline['Experiment'] == min_reps_exp]['Replication'].unique()
             final_step_agent_data = final_step_agent_data[final_step_agent_data['Replication'].isin(matching_reps)]
-            initial_step_agent_data = initial_step_agent_data[initial_step_agent_data['Replication'].isin(matching_reps)] 
-            unique_replications = matching_reps # Update the rep list to use for binning
-            
-    # 3. Clip data and define bins
+            initial_step_agent_data = initial_step_agent_data[initial_step_agent_data['Replication'].isin(matching_reps)]
+            unique_replications = matching_reps
+
     FLOOR_VALUE = 1e-2 
     final_step_agent_data['Wealth'] = np.clip(final_step_agent_data['Wealth'], a_min=FLOOR_VALUE, a_max=None)
     initial_step_agent_data['Wealth'] = np.clip(initial_step_agent_data['Wealth'], a_min=FLOOR_VALUE, a_max=None) 
     
-    binned_data_all_reps = [] # To store the final binned dataframes
-    binned_data_initial = [] # To store initial binned data
-    bin_order = [] # To store the bin order
-
+    binned_data_all_reps = []
+    binned_data_initial = []
+    
     if log_scale:
-        plot_title_suffix = '(Escala Log)'
         plot_filename_suffix = "LOG"
+        bin_edges = np.power(10.0, np.arange(-2, 8))
+        bin_labels = [f"$10^{{{i}}}$ a $10^{{{i+1}}}$" for i in range(-2, 7)]
+        bin_order = bin_labels
         
-        # --- FIX HERE ---
-        # Define bin edges as powers of 10, extending to 10^7 to catch the 10^6+ values
-        bin_edges = np.power(10.0, np.arange(-2, 8)) # Changed from 7 to 8
-        bin_labels = [f"$10^{{{i}}}$ a $10^{{{i+1}}}$" for i in range(-2, 7)] # Changed from 6 to 7
-        # --- END FIX ---
-        
-        bin_order = bin_labels # Use these labels for order
-        
-        # Bin FINAL data
-        grouped_final = final_step_agent_data.groupby(['Experiment', 'Replication'])
-        for (exp, rep), group_data in grouped_final:
-            binned_wealth = pd.cut(group_data['Wealth'], bins=bin_edges, labels=bin_labels, right=False)
-            bin_counts = binned_wealth.value_counts().reset_index()
-            bin_counts.columns = ['Wealth Bin Label', 'Count']
-            bin_counts['Experiment'] = exp
-            bin_counts['Replication'] = rep
-            binned_data_all_reps.append(bin_counts)
-        
-        # Bin INITIAL data
-        grouped_initial = initial_step_agent_data.groupby('Replication')
-        for rep, group_data in grouped_initial:
-            binned_wealth = pd.cut(group_data['Wealth'], bins=bin_edges, labels=bin_labels, right=False)
-            bin_counts = binned_wealth.value_counts().reset_index()
-            bin_counts.columns = ['Wealth Bin Label', 'Count']
-            bin_counts['Replication'] = rep
-            binned_data_initial.append(bin_counts)
-
-        if not binned_data_all_reps:
-            print(f"  > No binned wealth data to plot for R={rate}, log scale. Skipping.")
-            return
-        
+        for (exp, rep), group_data in final_step_agent_data.groupby(['Experiment', 'Replication']):
+            binned = pd.cut(group_data['Wealth'], bins=bin_edges, labels=bin_labels, right=False)
+            counts = binned.value_counts().reset_index()
+            counts.columns = ['Wealth Bin Label', 'Count']
+            counts['Experiment'] = exp
+            counts['Replication'] = rep
+            binned_data_all_reps.append(counts)
+            
+        for rep, group_data in initial_step_agent_data.groupby('Replication'):
+            binned = pd.cut(group_data['Wealth'], bins=bin_edges, labels=bin_labels, right=False)
+            counts = binned.value_counts().reset_index()
+            counts.columns = ['Wealth Bin Label', 'Count']
+            counts['Replication'] = rep
+            binned_data_initial.append(counts)
+            
+        if not binned_data_all_reps: return
+        # CORRECCIÓN AQUÍ: Usamos concat para la lista de DataFrames
         binned_df = pd.concat(binned_data_all_reps, ignore_index=True)
         binned_df_initial = pd.concat(binned_data_initial, ignore_index=True) if binned_data_initial else pd.DataFrame()
-
-    else: # Linear scale logic
-        plot_title_suffix = '(Escala Lineal)'
+            
+    else:
         plot_filename_suffix = "LINEAR"
-        
         data_min = FLOOR_VALUE
         data_max = final_step_agent_data['Wealth'].max()
-        if data_max <= data_min: data_max = data_min + 1
-
-        num_bins = 25
-        bins = np.linspace(data_min, data_max, num_bins)
+        if pd.isna(data_max) or data_max <= data_min: data_max = data_min + 1
+        bins = np.linspace(data_min, data_max, 25)
         bin_centers = (bins[:-1] + bins[1:]) / 2
         
-        binned_data_final = []
+        for exp in experiments:
+            for rep in unique_replications:
+                rep_data = final_step_agent_data[(final_step_agent_data['Experiment'] == exp) & (final_step_agent_data['Replication'] == rep)]['Wealth']
+                if not rep_data.empty:
+                    counts, _ = np.histogram(rep_data, bins=bins)
+                    for i, count in enumerate(counts):
+                        binned_data_all_reps.append({'Experiment': exp, 'Replication': rep, 'Wealth Bin Label': f'{bin_centers[i]:.1e}', 'Count': count})
         
-        # Bin FINAL data
-        for exp in experiments: # Use experiments list
-            for rep in unique_replications: # Use matched reps list
-                rep_data_mask = (final_step_agent_data['Experiment'] == exp) & (final_step_agent_data['Replication'] == rep)
-                rep_wealth_data = final_step_agent_data.loc[rep_data_mask, 'Wealth']
-                
-                if not rep_wealth_data.empty:
-                    counts, _ = np.histogram(rep_wealth_data, bins=bins)
-                    for i in range(len(counts)):
-                        binned_data_final.append({
-                            'Experiment': exp,
-                            'Replication': rep,
-                            'Wealth Bin': bin_centers[i],
-                            'Count': counts[i]
-                        })
-        
-        # Bin INITIAL data
         for rep in unique_replications:
-            rep_data_mask = initial_step_agent_data['Replication'] == rep
-            rep_wealth_data = initial_step_agent_data.loc[rep_data_mask, 'Wealth']
-            
-            if not rep_wealth_data.empty:
-                counts, _ = np.histogram(rep_wealth_data, bins=bins)
-                for i in range(len(counts)):
-                    binned_data_initial.append({
-                        'Replication': rep,
-                        'Wealth Bin': bin_centers[i],
-                        'Count': counts[i]
-                    })
-        
-        if not binned_data_final:
-            print(f"  > No binned wealth data to plot for R={rate}, linear scale. Skipping.")
-            return
+            rep_data = initial_step_agent_data[initial_step_agent_data['Replication'] == rep]['Wealth']
+            if not rep_data.empty:
+                counts, _ = np.histogram(rep_data, bins=bins)
+                for i, count in enumerate(counts):
+                    binned_data_initial.append({'Replication': rep, 'Wealth Bin Label': f'{bin_centers[i]:.1e}', 'Count': count})
 
-        binned_df = pd.DataFrame(binned_data_final)
-        binned_df['Wealth Bin Label'] = binned_df['Wealth Bin'].apply(lambda x: f'{x:.1e}')
+        if not binned_data_all_reps: return
+        # CORRECCIÓN AQUÍ: Usamos DataFrame para la lista de diccionarios
+        binned_df = pd.DataFrame(binned_data_all_reps)
+        binned_df_initial = pd.DataFrame(binned_data_initial)
+        bin_order = binned_df['Wealth Bin Label'].unique()
         
-        binned_df_initial = pd.DataFrame(binned_data_initial) if binned_data_initial else pd.DataFrame()
-        if not binned_df_initial.empty:
-            binned_df_initial['Wealth Bin Label'] = binned_df_initial['Wealth Bin'].apply(lambda x: f'{x:.1e}')
-        
-        bin_order = binned_df['Wealth Bin Label'].unique() # Get order for linear plot
+    if target_ax is None:
+        fig, ax = plt.subplots(figsize=(14, 8))
+        save_plot = True
+    else:
+        ax = target_ax
+        save_plot = False
 
-
-    # 5. Plot the average distribution using barplot
-    plt.figure(figsize=(14, 8))
     palette_to_use = "tab10" if len(experiments) >= 5 else "viridis"
-    ax = plt.gca() # Get the current axes
 
-    # --- PLOT 1 (BACKGROUND): FINAL distributions as colored bars ---
-    sns.barplot(data=binned_df, 
-                 x='Wealth Bin Label', 
-                 y='Count', 
-                 hue='Experiment', 
-                 order=bin_order, # Use same order
-                 palette=palette_to_use, 
-                 ci='sd',
-                 ax=ax) # Plot on the current axes
+    sns.barplot(data=binned_df, x='Wealth Bin Label', y='Count', hue='Experiment', order=bin_order, palette=palette_to_use, errorbar='sd', ax=ax)
 
-    # --- PLOT 2 (OVERLAY): INITIAL Distribution as hollow bars ---
     if not binned_df_initial.empty:
-        # Calculate initial means and std devs per bin MANUALLY
         initial_stats = binned_df_initial.groupby('Wealth Bin Label')['Count'].agg(['mean', 'std']).reindex(bin_order)
-
-        # Get the numeric locations of the x-ticks set by seaborn
         xticks_locs = ax.get_xticks()
-        xticklabels = [label.get_text() for label in ax.get_xticklabels()]
-
-        # Ensure we have the same number of ticks and labels
-        if len(xticks_locs) != len(bin_order):
-             print(f"Warning: Mismatch between number of ticks ({len(xticks_locs)}) and number of bins ({len(bin_order)}). Initial distribution overlay might be incorrect.")
-        else:
-            # Create a mapping from label text to numeric location
-            label_to_loc = {label: loc for label, loc in zip(bin_order, xticks_locs)} # Use bin_order for keys
-
-            # Plot initial bars manually
-            bar_width = 0.8 # Standard bar width, adjust if needed
+        if len(xticks_locs) == len(bin_order):
+            label_to_loc = dict(zip(bin_order, xticks_locs))
             for bin_label in bin_order:
-                 if bin_label in initial_stats.index and bin_label in label_to_loc:
-                     mean_val = initial_stats.loc[bin_label, 'mean']
-                     std_val = initial_stats.loc[bin_label, 'std']
-                     x_pos = label_to_loc[bin_label] # Get numeric position
+                if bin_label in initial_stats.index and not pd.isna(initial_stats.loc[bin_label, 'mean']):
+                    m = initial_stats.loc[bin_label, 'mean']
+                    s = initial_stats.loc[bin_label, 'std']
+                    x_pos = label_to_loc[bin_label]
+                    ax.bar(x_pos, m, width=0.8, facecolor=(1,1,1,0), edgecolor='black', linewidth=1.0, label='_nolegend_')
+                    ax.errorbar(x_pos, m, yerr=s, fmt='none', ecolor='black', elinewidth=1.0, capsize=3, label='_nolegend_')
 
-                     # Plot the hollow bar
-                     ax.bar(x_pos, mean_val, width=bar_width,
-                            facecolor=(1,1,1,0), edgecolor='black', linewidth=1.0,
-                            label='_nolegend_') # Use _nolegend_ to avoid auto-labeling
-
-                     # Plot the error bar
-                     ax.errorbar(x_pos, mean_val, yerr=std_val, fmt='none', # 'none' means no marker/line
-                                 ecolor='black', elinewidth=1.0, capsize=3, label='_nolegend_')
-
-    plt.title(f'Distribución de Riqueza Inicial vs. Final {plot_title_suffix}, R = {rate})', fontsize=16)
-    plt.xlabel('Riqueza', fontsize=12) # Your label
-    plt.ylabel('Número de Agentes', fontsize=12) # Your label
+    ax.set_title("") 
+    ax.set_xlabel('Riqueza (Escala Log)' if log_scale else 'Riqueza (Escala Lineal)', fontsize=12)
+    ax.set_ylabel('Número de Agentes', fontsize=12)
+    ax.tick_params(axis='x', rotation=45, labelsize=10)
     
-    plt.xticks(rotation=45, ha='right', fontsize=9) 
-    
-    # --- De-duplicate Legend ---
     handles, labels = ax.get_legend_handles_labels()
-    # Manually add legend entry for initial distribution if plotted
     if not binned_df_initial.empty and 'Initial (t=0)' not in labels:
-         initial_patch = Patch(facecolor='none', edgecolor='black', linewidth=1.0, label='Initial (t=0)')
-         handles.append(initial_patch)
-         labels.append('Initial (t=0)')
+        handles.append(Patch(facecolor='none', edgecolor='black', linewidth=1.0, label='Initial (t=0)'))
+        labels.append('Initial (t=0)')
+    
     by_label = dict(zip(labels, handles))
-    ax.legend(by_label.values(), by_label.keys(), title='Experiment')
-    # --- End Legend Logic ---
+    ax.legend(by_label.values(), by_label.keys(), title='Experimento', bbox_to_anchor=(1.01, 1), loc='upper left')
     
-    plt.tight_layout()
-    
-    filename = f"PHASE2_3_FinalWealthDist_Barplot_{plot_filename_suffix}_R_{rate}.png"
-    plt.savefig(os.path.join(OUTPUT_DIR_PLOTS, filename))
-    plt.close()
-    print(f"  > Saved final agent wealth bar plot ({plot_filename_suffix} scale) to: {filename}")
+    if save_plot:
+        plt.tight_layout()
+        plt.savefig(os.path.join(OUTPUT_DIR_PLOTS, f"PHASE2_3_FinalWealthDist_Barplot_{plot_filename_suffix}_R_{rate}.png"), bbox_inches='tight')
+        plt.close()
 
-def plot_final_consumption_distribution_barplot(agent_data, rate):
-    """
-    Plots the average distribution of final consumption as a bar plot with confidence bands.
-    This version is log-scale only, as consumption is heavily skewed.
-    (Does NOT include initial distribution)
-    """
-    # 1. Get final step data
+def plot_final_consumption_distribution_barplot(agent_data, rate, target_ax=None):
     final_step_agent_data = agent_data[(agent_data['Rate'] == rate) & (agent_data['Step'] == SIMULATION_STEPS - 1)].copy()
-
-    # 2. Apply replication matching logic
     experiments = sorted(final_step_agent_data['Experiment'].unique())
-    matching_reps = None
+    if not experiments: return
+    
     if 'baseline' in experiments:
-        non_baseline_data = final_step_agent_data[final_step_agent_data['Experiment'] != 'baseline']
-        if not non_baseline_data.empty:
-            rep_counts = non_baseline_data.groupby('Experiment')['Replication'].nunique()
-            min_reps_exp = rep_counts.idxmin()
-            min_reps_n = rep_counts.min()
-            matching_reps = non_baseline_data[non_baseline_data['Experiment'] == min_reps_exp]['Replication'].unique()
-            print(f"  > DISTRIBUTION PLOT (Consumption): Matching replications for fair comparison, N={min_reps_n} (from '{min_reps_exp}')")
+        non_baseline = final_step_agent_data[final_step_agent_data['Experiment'] != 'baseline']
+        if not non_baseline.empty:
+            min_reps_exp = non_baseline.groupby('Experiment')['Replication'].nunique().idxmin()
+            matching_reps = non_baseline[non_baseline['Experiment'] == min_reps_exp]['Replication'].unique()
             final_step_agent_data = final_step_agent_data[final_step_agent_data['Replication'].isin(matching_reps)]
 
-    # 3. Clip data
-    FLOOR_VALUE = 1e-2 
-    final_step_agent_data['Consumption'] = np.clip(final_step_agent_data['Consumption'], a_min=FLOOR_VALUE, a_max=None)
-
-    # 4. Binning Strategy
-    # --- FIX HERE ---
-    bin_edges = np.power(10.0, np.arange(-2, 8)) # Changed from 7 to 8
-    bin_labels = [f"$10^{{{i}}}$ - $10^{{{i+1}}}$" for i in range(-2, 7)] # Changed from 6 to 7
-    # --- END FIX ---
+    final_step_agent_data['Consumption'] = np.clip(final_step_agent_data['Consumption'], a_min=1e-2, a_max=None)
     
-    bin_order = bin_labels # Use for ordering x-axis
+    bin_edges = np.power(10.0, np.arange(-2, 8))
+    bin_labels = [f"$10^{{{i}}}$ - $10^{{{i+1}}}$" for i in range(-2, 7)]
     
-    binned_data_all_reps = []
-    grouped = final_step_agent_data.groupby(['Experiment', 'Replication'])
-    
-    for (exp, rep), group_data in grouped:
-        binned_consumption = pd.cut(group_data['Consumption'], 
-                                  bins=bin_edges, 
-                                  labels=bin_labels, 
-                                  right=False)
+    binned_data = []
+    for (exp, rep), group in final_step_agent_data.groupby(['Experiment', 'Replication']):
+        counts = pd.cut(group['Consumption'], bins=bin_edges, labels=bin_labels, right=False).value_counts().reset_index()
+        counts.columns = ['Consumption Bin Label', 'Count']
+        counts['Experiment'] = exp
+        binned_data.append(counts)
         
-        bin_counts = binned_consumption.value_counts().reset_index()
-        bin_counts.columns = ['Consumption Bin Label', 'Count']
-        bin_counts['Experiment'] = exp
-        bin_counts['Replication'] = rep
-        binned_data_all_reps.append(bin_counts)
+    binned_df = pd.concat(binned_data, ignore_index=True)
     
-    if not binned_data_all_reps:
-        print(f"  > No binned consumption data to plot for R={rate}. Skipping.")
-        return
+    if target_ax is None:
+        fig, ax = plt.subplots(figsize=(14, 8))
+        save_plot = True
+    else:
+        ax = target_ax
+        save_plot = False
 
-    binned_df = pd.concat(binned_data_all_reps, ignore_index=True)
+    palette_to_use = 'tab10' if len(experiments) >= 5 else 'viridis'
+    sns.barplot(data=binned_df, x='Consumption Bin Label', y='Count', hue='Experiment', order=bin_labels, palette=palette_to_use, ci='sd', ax=ax)
     
-    # 5. Plot the average distribution using barplot
-    plt.figure(figsize=(14, 8))
-    palette_to_use = "tab10" if len(experiments) >= 5 else "viridis"
+    ax.set_title("") 
+    ax.set_xlabel('Consumo (Escala Log)', fontsize=12)
+    ax.set_ylabel('Número de Agentes', fontsize=12)
+    ax.tick_params(axis='x', rotation=45, labelsize=10)
+    ax.legend(title='Experimento', bbox_to_anchor=(1.01, 1), loc='upper left')
+    
+    if save_plot:
+        plt.tight_layout()
+        plt.savefig(os.path.join(OUTPUT_DIR_PLOTS, f'PHASE2_3_FinalConsumptionDist_Barplot_LOG_R_{rate}.png'), bbox_inches='tight')
+        plt.close()
 
-    sns.barplot(data=binned_df, 
-                 x='Consumption Bin Label', # Use new LaTeX labels
-                 y='Count', 
-                 hue='Experiment', 
-                 order=bin_order, # Ensure correct order
-                 palette=palette_to_use, 
-                 ci='sd')
-                 
-    plt.title(f'Distribución de Consumo Final Promedio (Escala Log), R = {rate})', fontsize=16)
-    plt.xlabel('Consumo', fontsize=12) # Your label
-    plt.ylabel('Número de Agentes', fontsize=12) # Your label
+def plot_composite_time_series(data, rate):
+    """Crea panel 3x1 (vertical) para Riqueza, Consumo y Gini con formato APA (A, B, C)"""
+    fig, axes = plt.subplots(3, 1, figsize=(14, 20)) 
     
-    plt.xticks(rotation=45, ha='right', fontsize=9)
+    metrics = ["Average Wealth", "Average Consumption", "Gini_Coefficient"]
+    panel_labels = ['A', 'B', 'C']
+    
+    for i, metric in enumerate(metrics):
+        plot_time_series_comparison(data, metric, rate, target_ax=axes[i])
+        
+        # Añadir la letra identificadora del panel (Formato APA)
+        axes[i].text(-0.06, 1.02, panel_labels[i], transform=axes[i].transAxes, 
+                     fontsize=16, fontweight='bold', va='bottom')
+        
+        # Formato APA estricto: quitar bordes superior y derecho
+        axes[i].spines['top'].set_visible(False)
+        axes[i].spines['right'].set_visible(False)
+        
+        if i < 2:
+            legend = axes[i].get_legend()
+            if legend:
+                legend.remove()
+        else:
+            axes[i].legend(title='Experimento', bbox_to_anchor=(1.01, 1), loc='upper left', frameon=False)
+                
+    plt.subplots_adjust(hspace=0.3) 
+    filename = f'Panel_Agregados_Vertical_Riqueza_Consumo_Gini_R_{rate}.png'
+    
+    fig.savefig(os.path.join(OUTPUT_DIR_PLOTS, filename), bbox_inches='tight', dpi=300)
+    plt.close(fig)
+    print(f'  > Guardado Panel Vertical de Agregados: {filename}')
 
-    plt.legend() 
-    plt.tight_layout()
+
+def plot_composite_distributions(agent_data, rate):
+    """Crea panel 2x1 para Distribuciones con formato APA (A, B)"""
+    fig, axes = plt.subplots(2, 1, figsize=(14, 16)) 
     
-    filename = f"PHASE2_3_FinalConsumptionDist_Barplot_LOG_R_{rate}.png"
-    plt.savefig(os.path.join(OUTPUT_DIR_PLOTS, filename))
-    plt.close()
-    print(f"  > Saved final agent consumption bar plot (log scale) to: {filename}")
+    # Riqueza LOG
+    plot_final_wealth_distribution_barplot(agent_data, rate, log_scale=True, target_ax=axes[0])
+    # Consumo LOG
+    plot_final_consumption_distribution_barplot(agent_data, rate, target_ax=axes[1])
+    
+    panel_labels = ['A', 'B']
+    
+    for i, ax in enumerate(axes):
+        # Añadir la letra identificadora del panel (Formato APA)
+        ax.text(-0.06, 1.02, panel_labels[i], transform=ax.transAxes, 
+                fontsize=16, fontweight='bold', va='bottom')
+        
+        # Limpieza de bordes y aseguramiento de márgenes
+        ax.spines['top'].set_visible(False)
+        ax.spines['right'].set_visible(False)
+        if ax.get_legend() is not None:
+             ax.get_legend().set_frame_on(False)
+    
+    plt.subplots_adjust(hspace=0.4) 
+    
+    filename = f'Panel_Distribuciones_Vertical_Log_R_{rate}.png'
+    fig.savefig(os.path.join(OUTPUT_DIR_PLOTS, filename), bbox_inches='tight', dpi=300)
+    plt.close(fig)
+    print(f'  > Guardado Panel Vertical de Distribuciones: {filename}')
 
 def plot_verification_barplots(rate):
     """
@@ -1096,21 +1033,21 @@ if __name__ == "__main__":
 
         # Condicionar generación de gráficas
         if GENERATE_PLOTS:
-            print(f"\n--- Generating Plots for R = {interest_rate} ---")
-            for metric in model_metrics_to_plot:
-                plot_time_series_comparison(rate_model_data, metric, interest_rate)
-                plot_final_distribution(rate_model_data, metric, interest_rate)
+            print(f"\n--- Generando Paneles Compuestos para R = {interest_rate} ---")
+            
+            # Generar los paneles consolidados (reducción de figuras 12, 13, 14, 17, 18, 19, 22, 23)
+            plot_composite_time_series(rate_model_data, interest_rate)
+            plot_composite_distributions(rate_agent_data, interest_rate)
 
+            # Generar las gráficas específicas por perfiles que se mantienen originales
+            # (Figuras 15, 16, 20, 21)
+            print(f"--- Generando gráficas por perfil para R = {interest_rate} ---")
             plot_wealth_by_profile(rate_agent_data, interest_rate)
             plot_beta_by_profile(rate_agent_data, interest_rate)
-
-            plot_final_wealth_distribution_barplot(rate_agent_data, interest_rate, log_scale=True)
-            plot_final_wealth_distribution_barplot(rate_agent_data, interest_rate, log_scale=False)
             
-            plot_final_consumption_distribution_barplot(rate_agent_data, interest_rate)
-            
+            # Mantener boxplots para presentación futura
             plot_verification_barplots(interest_rate) 
+            
         else:
             print(f"\n--- Omitiendo generación de gráficas para R = {interest_rate} (GENERATE_PLOTS = False) ---")
-
     print("\n========================= ANALYSIS COMPLETE =========================")
