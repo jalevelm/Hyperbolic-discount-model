@@ -34,7 +34,7 @@ Replicating the model and its findings is divided into two primary phases: gener
 Execute the main model script to run the simulations. The script will automatically pre-compute the Value Functions (if not cached), simulate the defined experiments, and export the data.
 
 ```bash
-python Model.py
+python3 Model.py
 ```
 
 **What happens during execution?**
@@ -48,7 +48,7 @@ python Model.py
 Once the simulation completes, run the analysis script to parse the output and generate plots and tables.
 
 ```bash
-python analyze_results.py
+python3 analyze_results.py
 ```
 
 **What happens during execution?**
@@ -78,4 +78,4 @@ Similarly, in `analyze_results.py`, you can modify constants like `EXPERIMENTS_T
 
 ## References
 
-- Cao, D., & Werning, I. (2018). Saving and Dissaving with Hyperbolic Discounting. *Econometrica*, 86(3), 805-857.
+- Cao, D., & Werning, I. (2018). Saving and Dissaving with Hyperbolic Discounting. *Econometrica*, 86(3), 805-857. https://doi.org/10.3982/ecta15112
