@@ -76,6 +76,10 @@ You can easily modify the simulation conditions by editing the configuration blo
 
 Similarly, in `analyze_results.py`, you can modify constants like `EXPERIMENTS_TO_PLOT` or `RATES_TO_PROCESS` to focus the output generation on specific scenarios.
 
+## License
+
+This project is licensed under the GNU General Public License v3.0 - see the [LICENSE](LICENSE) file for details.
+
 ## References
 
 - Cao, D., & Werning, I. (2018). Saving and Dissaving with Hyperbolic Discounting. *Econometrica*, 86(3), 805-857. https://doi.org/10.3982/ecta15112

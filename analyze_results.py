@@ -1,3 +1,19 @@
+# analyze_results.py - Data processing, statistical testing, and visualization pipeline
+# Copyright (C) 2026 Alejandro Velazquez
+#
+# This program is free software: you can redistribute it and/or modify
+# it under the terms of the GNU General Public License as published by
+# the Free Software Foundation, either version 3 of the License, or
+# (at your option) any later version.
+#
+# This program is distributed in the hope that it will be useful,
+# but WITHOUT ANY WARRANTY; without even the implied warranty of
+# MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
+# GNU General Public License for more details.
+#
+# You should have received a copy of the GNU General Public License
+# along with this program.  If not, see <https://www.gnu.org/licenses/>.
+
 import pandas as pd
 import matplotlib.pyplot as plt
 import seaborn as sns
@@ -8,9 +24,8 @@ from scipy import stats
 from matplotlib.patches import Patch 
 import pingouin as pg
 
-# =============================================================================
 # --- 1. SETUP & CONFIGURATION ---
-# =============================================================================
+
 # --- Directories ---
 OUTPUT_DIR_CSV = "output_csv"
 OUTPUT_DIR_PLOTS = "output_plots"
@@ -34,9 +49,9 @@ GENERATE_PLOTS = True
 EXPERIMENTS_TO_PLOT = ["baseline", "info_diffusion_only", "peer_comparison_only", "social_norms_only", "all_interactions"] 
 RATES_TO_PROCESS = [1.12] 
 
-# =============================================================================
+
 # --- 2. DATA LOADING AND AGGREGATION ---
-# =============================================================================
+
 def load_and_aggregate_data(csv_dir):
     all_model_files = [f for f in os.listdir(csv_dir) if "model_data" in f]
     all_agent_files = [f for f in os.listdir(csv_dir) if "agent_data" in f]
@@ -76,9 +91,9 @@ def load_and_aggregate_data(csv_dir):
     print(f"Successfully loaded {len(aggregated_model_data)} model data rows and {len(aggregated_agent_data)} agent data rows.")
     return aggregated_model_data, aggregated_agent_data
 
-# =============================================================================
+
 # --- 3. TABLE GENERATION FUNCTIONS ---
-# =============================================================================
+
 def generate_summary_table(model_data, agent_data, rate):
     """
     Generates a summary table with initial/final values, broke agents, and wealth distribution stats.
@@ -212,11 +227,11 @@ def generate_statistical_table(model_data, agent_data, rate):
 
         if is_not_beta_metric or is_beta_metric_and_relevant:
             if len(all_experiments) > 1:
-                # Ruido mayor (1e-4) para evitar pérdida por precisión de punto flotante
+
                 df_metric[col_name] = df_metric[col_name].astype(float) + np.random.uniform(-1e-4, 1e-4, size=len(df_metric))
                 
                 try:
-                    # Nombres de columna fijos extraídos de tu versión de pingouin
+
                     anova_res = pg.welch_anova(dv=col_name, between='Experiment', data=df_metric)
                     f_stat = anova_res['F'].iloc[0]
                     p_anova = anova_res['p_unc'].iloc[0]
@@ -227,7 +242,7 @@ def generate_statistical_table(model_data, agent_data, rate):
                     print(f"  > Advertencia: No se pudo calcular ANOVA/Games-Howell para {metric_name}. Motivo: {e}")
 
         for exp in experiments_to_compare:
-            # Regla de exclusión para métricas de Beta en mecanismos que no lo alteran
+  
             if metric_name == 'Final Avg. Beta' and exp not in beta_modifying_experiments:
                 stat_results.append({
                     'Metric Tested': metric_name,
@@ -244,15 +259,15 @@ def generate_statistical_table(model_data, agent_data, rate):
             is_sig = 'No'
 
             if posthoc is not None and not posthoc.empty:
-                # Filtrar la comparación específica
+
                 match = posthoc[((posthoc['A'] == exp) & (posthoc['B'] == 'baseline')) | 
                                 ((posthoc['A'] == 'baseline') & (posthoc['B'] == exp))]
                 
                 if not match.empty:
-                    # Nombres de columna fijos extraídos de tu versión de pingouin
+
                     t_stat_gh = match['T'].iloc[0]
                     if match['A'].iloc[0] == 'baseline':
-                        t_stat_gh = -t_stat_gh  # Ajustar signo si el orden se invierte
+                        t_stat_gh = -t_stat_gh 
 
                     p_val_gh = match['pval'].iloc[0]
                     is_sig = 'Yes' if p_val_gh < 0.05 else 'No'
@@ -277,9 +292,8 @@ def generate_statistical_table(model_data, agent_data, rate):
     print(f"  > Saved standardized statistical table with Welch F-statistic to: {filename}")
 
 
-# =============================================================================
 # --- 4. ANALYSIS & PLOTTING FUNCTIONS ---
-# =============================================================================
+
 def plot_phase1_validation(v_g_dir, num_wealth_points):
     print("\n--- Generating Phase 1: VFI Validation Plots ---")
     agent_profiles = {
@@ -330,7 +344,6 @@ def plot_time_series_comparison(data, metric, rate, target_ax=None):
         
     sns.lineplot(data=plot_data, x='Step', y=metric, hue='Experiment', palette=palette_to_use, ci=ci_to_use, ax=ax)
     
-    # Formato APA: Sin título incrustado. Etiquetas descriptivas en los ejes.
     ax.set_xlabel('Paso de Simulación', fontsize=11)
     ax.set_ylabel(metric.replace('_', ' '), fontsize=11)
 
@@ -656,11 +669,9 @@ def plot_composite_time_series(data, rate):
     for i, metric in enumerate(metrics):
         plot_time_series_comparison(data, metric, rate, target_ax=axes[i])
         
-        # Añadir la letra identificadora del panel (Formato APA)
         axes[i].text(-0.06, 1.02, panel_labels[i], transform=axes[i].transAxes, 
                      fontsize=16, fontweight='bold', va='bottom')
         
-        # Formato APA estricto: quitar bordes superior y derecho
         axes[i].spines['top'].set_visible(False)
         axes[i].spines['right'].set_visible(False)
         
@@ -695,7 +706,6 @@ def plot_composite_distributions(agent_data, rate):
         ax.text(-0.06, 1.02, panel_labels[i], transform=ax.transAxes, 
                 fontsize=16, fontweight='bold', va='bottom')
         
-        # Limpieza de bordes y aseguramiento de márgenes
         ax.spines['top'].set_visible(False)
         ax.spines['right'].set_visible(False)
         if ax.get_legend() is not None:
@@ -759,7 +769,6 @@ def plot_verification_barplots(rate):
             data_to_plot_initial = data_to_plot_initial[data_to_plot_initial['Replication'].isin(matching_reps)]
             unique_replications = matching_reps
 
-    # --- Loop for both plot types ---
     for log_scale in [True, False]:
         
         # 1. Clip data
@@ -806,7 +815,7 @@ def plot_verification_barplots(rate):
             binned_df = pd.concat(binned_data_all_reps, ignore_index=True)
             binned_df_initial = pd.concat(binned_data_initial, ignore_index=True) if binned_data_initial else pd.DataFrame()
         
-        else: # Linear scale logic
+        else: 
             plot_title_suffix = '(Escala Lineal)'
             plot_filename_suffix = "LINEAR"
 
@@ -862,12 +871,10 @@ def plot_verification_barplots(rate):
             bin_order = binned_df['Wealth Bin Label'].unique()
 
 
-        # 3. Plot the average distribution using barplot
         plt.figure(figsize=(14, 8))
         palette_to_use = "tab10" if len(experiments) >= 5 else "viridis"
         ax = plt.gca() # Get current axes
 
-        # --- PLOT 1 (BACKGROUND): FINAL distributions as colored bars ---
         sns.barplot(data=binned_df, 
                      x='Wealth Bin Label', 
                      y='Count', 
@@ -877,9 +884,8 @@ def plot_verification_barplots(rate):
                      ci='sd',
                      ax=ax)
                      
-        # --- PLOT 2 (OVERLAY): INITIAL Distribution as hollow bars plotted manually ---
         if not binned_df_initial.empty:
-            # Calculate initial means and std devs per bin MANUALLY
+            # Calculate initial means and std devs per bin 
             initial_stats = binned_df_initial.groupby('Wealth Bin Label')['Count'].agg(['mean', 'std']).reindex(bin_order)
 
             # Get the numeric locations of the x-ticks set by seaborn
@@ -889,10 +895,8 @@ def plot_verification_barplots(rate):
             if len(xticks_locs) != len(bin_order):
                  print(f"Warning: [VERIFICATION] Mismatch between number of ticks ({len(xticks_locs)}) and number of bins ({len(bin_order)}). Initial distribution overlay might be incorrect.")
             else:
-                # Create a mapping from label text to numeric location
-                label_to_loc = {label: loc for label, loc in zip(bin_order, xticks_locs)} # Use bin_order for keys
+                label_to_loc = {label: loc for label, loc in zip(bin_order, xticks_locs)} 
 
-                # Plot initial bars manually
                 bar_width = 0.8 # Standard bar width
                 for bin_label in bin_order:
                      if bin_label in initial_stats.index and bin_label in label_to_loc:
@@ -915,9 +919,7 @@ def plot_verification_barplots(rate):
         
         plt.xticks(rotation=45, ha='right', fontsize=9)
         
-        # --- De-duplicate Legend ---
         handles, labels = ax.get_legend_handles_labels()
-        # Manually add legend entry for initial distribution if plotted
         if not binned_df_initial.empty and 'Initial (t=0)' not in labels:
              initial_patch = Patch(facecolor='none', edgecolor='black', linewidth=1.0, label='Initial (t=0)')
              handles.append(initial_patch)
@@ -984,9 +986,9 @@ def perform_statistical_analysis(data, metric, rate):
     except Exception as e:
         print(f"Error realizando el análisis estadístico para {metric}: {e}")
 
-# =============================================================================
+
 # --- 5. MAIN EXECUTION BLOCK ---
-# =============================================================================
+
 if __name__ == "__main__":
     agg_model_path = os.path.join(OUTPUT_DIR_PLOTS, "aggregated_model_data_all_runs.csv")
     agg_agent_path = os.path.join(OUTPUT_DIR_PLOTS, "aggregated_agent_data_all_runs.csv")
@@ -1002,19 +1004,19 @@ if __name__ == "__main__":
         agent_data.to_csv(agg_agent_path, index=False)
     try:
         print(f"\n--- Exporting final step wealth for verification... ---")
-        # Use the constant defined at the top of the script
+
         final_step_number = SIMULATION_STEPS - 1 
         
-        # Filter for the final step
+       
         final_wealth_df = agent_data[agent_data['Step'] == final_step_number].copy()
         
-        # Define the output path
+       
         verification_path = os.path.join(OUTPUT_DIR_TABLES, "VERIFICATION_final_step_agent_wealth.csv")
         
-        # Select relevant columns (now including AgentID) and save
+        
         columns_to_save = ['Experiment', 'Rate', 'Replication', 'AgentID', 'Wealth']
         
-        # Ensure all columns exist before trying to save
+   
         final_wealth_df_to_save = final_wealth_df[columns_to_save]
         final_wealth_df_to_save.to_csv(verification_path, index=False, float_format='%.5f')
         
@@ -1043,9 +1045,8 @@ if __name__ == "__main__":
     else:
         print("\n--- Skipping Phase 1 VFI Validation Plots as per configuration. ---")
 
-    # --- START OF MODIFIED SECTION ---
-    
-    # --- Determine which interest rates to process based on config ---
+
+
     all_available_rates = sorted(model_data['Rate'].unique())
     
     rates_to_iterate = []
@@ -1053,10 +1054,8 @@ if __name__ == "__main__":
         rates_to_iterate = all_available_rates
         print(f"\n--- No specific rates selected. Analyzing all found rates: {rates_to_iterate} ---")
     else:
-        # Filter the user's list to only include rates that actually exist in the data
         rates_to_iterate = [r for r in RATES_TO_PROCESS if r in all_available_rates]
         
-        # Warn the user if they specified rates that weren't found
         missing_rates = [r for r in RATES_TO_PROCESS if r not in all_available_rates]
         if missing_rates:
             print(f"\n--- Warning: Could not find data for specified rates: {missing_rates} ---")
@@ -1066,7 +1065,7 @@ if __name__ == "__main__":
     if not rates_to_iterate:
             print("\n--- No data found for any of the specified rates. Exiting analysis. ---")
 
-    # --- Main analysis loop ---
+
     for interest_rate in rates_to_iterate:
     
         print(f"\n{'='*25} ANALYZING RESULTS FOR R = {interest_rate} {'='*25}")
@@ -1087,21 +1086,17 @@ if __name__ == "__main__":
         for metric in model_metrics_to_plot:
             perform_statistical_analysis(rate_model_data, metric, interest_rate)
 
-        # Condicionar generación de gráficas
+
         if GENERATE_PLOTS:
             print(f"\n--- Generando Paneles Compuestos para R = {interest_rate} ---")
             
-            # Generar los paneles consolidados (reducción de figuras 12, 13, 14, 17, 18, 19, 22, 23)
             plot_composite_time_series(rate_model_data, interest_rate)
             plot_composite_distributions(rate_agent_data, interest_rate)
 
-            # Generar las gráficas específicas por perfiles que se mantienen originales
-            # (Figuras 15, 16, 20, 21)
             print(f"--- Generando gráficas por perfil para R = {interest_rate} ---")
             plot_wealth_by_profile(rate_agent_data, interest_rate)
             plot_beta_by_profile(rate_agent_data, interest_rate)
             
-            # Mantener boxplots para presentación futura
             plot_verification_barplots(interest_rate) 
             
         else:

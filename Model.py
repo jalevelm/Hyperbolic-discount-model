@@ -1,3 +1,19 @@
+# Model.py - Core ABM implementation for saving and dissaving with hyperbolic discounting
+# Copyright (C) 2026 Alejandro Velazquez
+#
+# This program is free software: you can redistribute it and/or modify
+# it under the terms of the GNU General Public License as published by
+# the Free Software Foundation, either version 3 of the License, or
+# (at your option) any later version.
+#
+# This program is distributed in the hope that it will be useful,
+# but WITHOUT ANY WARRANTY; without even the implied warranty of
+# MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
+# GNU General Public License for more details.
+#
+# You should have received a copy of the GNU General Public License
+# along with this program.  If not, see <https://www.gnu.org/licenses/>.
+
 import sys 
 import os 
 from mesa import Agent, Model
@@ -70,7 +86,7 @@ class SavingAgent(Agent):
             sigma (float): Coefficient of relative risk aversion.
             borrowing_limit (float): Minimum allowed wealth level.
         """
-        super().__init__(unique_id, model)  # Call the superclass constructor
+        super().__init__(unique_id, model)  
 
         self.profile_name = profile_name
         self.original_profile = profile_name
@@ -141,7 +157,6 @@ class SavingAgent(Agent):
         """
         Advances the agent by one time step, printing detailed logs of its actions.
         """
-        # --- Print Initial State ---
         if self.step_count == 0:
             print(f"Agent {self.unique_id} ({self.profile_name}): First Step - Beta: {self.beta}, Delta: {self.delta}, R_star: {self.R_star}")
             neighbors = self.get_neighbors()
@@ -150,7 +165,6 @@ class SavingAgent(Agent):
         print(f"Agent {self.unique_id} ({self.profile_name}): Step start. Wealth: {self.wealth:.4f}, Previous Savings: {self.previous_savings}")
         print(f"Agent {self.unique_id}: R = {self.model.interest_rate}, R_star = {self.R_star}")
 
-        # --- Retrieve VFI Solution (First Step Only) ---
         try:
             self.V, self.g = self.model.vfi_cache[self.profile_name]
         except KeyError:
@@ -221,7 +235,7 @@ class SavingAgent(Agent):
                     neighborhood_beta_norm = np.mean(neighbor_betas)
                     
                     # 3. Adjust the agent's own beta towards the norm
-                    # This represents a slow change in the agent's core preferences 
+                    # This represents a slow change in the agent's preferences 
                     strength = self.model.social_norm_strength
                     self.beta = ((1 - strength) * self.beta) + (strength * neighborhood_beta_norm)
 
@@ -237,7 +251,6 @@ class SavingAgent(Agent):
         percentage_consumed = (self.consumption / (wealth_with_interest + 1e-9)) * 100
         percentage_saved = (self.savings / (wealth_with_interest + 1e-9)) * 100
 
-        # --- Print Detailed Decision Logs ---
         print(f"Agent {self.unique_id}: Step {self.step_count}")
         print(f"  Previous Wealth: {self.previous_wealth:.4f}")
         print(f"  Optimal Savings (from policy): {optimal_savings_from_policy:.4f}")
@@ -251,11 +264,9 @@ class SavingAgent(Agent):
         self.wealth = self.savings
         self.previous_savings = self.savings
 
-        # --- Print Final Summary ---
         print(f"Agent {self.unique_id}: Step end. | Total resources: {wealth_with_interest:.2f}, Consumption: {self.consumption:.2f}, Savings: {self.savings:.2f}, Wealth end of step: {self.wealth:.2f}")
         print(f"Percentage consumed: {percentage_consumed:.2f}%, percentage saved: {percentage_saved:.2f}%\n")
 
-        # --- History Tracking ---
         self.consumption_history.append(self.consumption)
         self.wealth_history.append(self.wealth)
         self.utility_history.append(self.utility(self.consumption))
@@ -265,6 +276,7 @@ class SavingAgent(Agent):
 def compute_gini(model):
     """Calculates the Gini coefficient of agent wealth."""
     agent_wealths = [agent.wealth for agent in model.schedule.agents]
+
     if len(agent_wealths) < 2:
         return 0
     # Formula for Gini coefficient
@@ -372,31 +384,10 @@ class SavingModel(Model):
     A Mesa model simulating the saving behavior of agents with
     time-inconsistent preferences, based on the Cao-Werning (2018) model.
 
-    The model features a single agent (for now, for debugging purposes) that makes
+    The model features  agents that make
     consumption and savings decisions in discrete time over a finite horizon.
-    The agent has hyperbolic discounting preferences and faces a constant
+    Each agent has hyperbolic discounting preferences and faces a constant
     interest rate and a borrowing constraint.
-
-    Attributes:
-        num_agents (int): The number of agents in the model (currently fixed at 1).
-        grid (MultiGrid): A Mesa MultiGrid object (not actively used in this
-            single-agent version, but retained for potential future extensions).
-        schedule (RandomActivation): A scheduler that activates agents in random
-            order (in this case, only one agent).
-        interest_rate (float): The constant gross interest rate for saving and
-            borrowing.
-        sigma (float): the inverse of the elasticity of intertemporal substitution for the
-            agent's utility function.
-        max_wealth (float): The maximum wealth level allowed in the model.
-            Used to define the wealth grid.
-        borrowing_limit (float): The minimum allowed wealth level (set to 0).
-        wealth_dist (list): A list of tuples defining the distribution of
-            initial wealth among agents.  Each tuple contains a probability
-            and a wealth range (min, max).
-        wealth_grid (np.ndarray): A discretized grid of possible wealth levels,
-            used for value function iteration and interpolation.
-        datacollector (DataCollector): A Mesa DataCollector object for collecting
-            model and agent-level data during the simulation.
     """
     
     def __init__(self, population_composition, interest_rate, sigma, wealth_dist, 
@@ -467,7 +458,7 @@ class SavingModel(Model):
         self.setup_network(network, network_params)
         self.schedule = RandomActivation(self)
         
-        # --- Create Agents (who will now all get cache hits) ---
+        # --- Create Agents ---
         self.create_agents(population_composition)
         
         # --- Data Collection ---
@@ -612,18 +603,13 @@ class SavingModel(Model):
         # Use a set to find unique new profiles that need to be computed
         profiles_to_compute = set()
         
-        # First, update agent profile names based on their current beta
         for agent in self.schedule.agents:
             # Create a new, unique profile name based on the agent's current preferences
-            # Using 4 decimal places for beta is a good balance of precision and grouping
             new_profile_name = f"dynamic_beta_{agent.beta:.4f}_delta_{agent.delta:.4f}"
             
-            # If this new profile doesn't exist in our cache, we need to compute it
             if new_profile_name not in self.vfi_cache:
-                # Add the necessary parameters to our set for computation
                 profiles_to_compute.add((new_profile_name, agent.beta, agent.delta))
             
-            # Assign the new profile name to the agent. They will use it in their next step.
             agent.profile_name = new_profile_name
 
         if not profiles_to_compute:
@@ -656,7 +642,6 @@ class SavingModel(Model):
             delayed(calculate_vfi_for_profile)(prof_params, model_params) for prof_params in profile_params_list
         )
 
-        # Update the cache with the new results
         for profile_name, V, g in results:
             self.vfi_cache[profile_name] = (V, g)
         
@@ -743,14 +728,12 @@ output_dir_text = "output_text"
 os.makedirs(output_dir_text, exist_ok=True)
 log_filepath = os.path.join(output_dir_text, "simulation_run_log.txt")
 
-# This print statement will appear in your console
 print(f"Starting simulation. All detailed output will be saved to: {log_filepath}")
 
 # --- 3. Run Simulation with Logging ---
 
-# This 'with' block handles the log file redirection
 with open(log_filepath, "w") as log_file:
-    # --- REDIRECT STDOUT (all print statements) TO THE LOG FILE ---
+    # --- REDIRECT STDOUT TO THE LOG FILE ---
     original_stdout = sys.stdout
     sys.stdout = log_file
 
