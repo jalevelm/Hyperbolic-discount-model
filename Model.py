@@ -156,7 +156,6 @@ class SavingAgent(Agent):
         except KeyError:
             raise Exception(f"CRITICAL ERROR: VFI for profile '{self.profile_name}' not found in cache for Agent {self.unique_id}.")
 
-        # --- START: INFORMATION DIFFUSION LOGIC BLOCK ---
         if self.model.information_diffusion_active and self.model.information_diffusion_strength > 0:
             neighbors = self.get_neighbors()
             if neighbors:
@@ -171,7 +170,6 @@ class SavingAgent(Agent):
                     #    of the more literate neighbors. The strength parameter controls the speed.
                     learning_rate = self.model.information_diffusion_strength
                     self.financial_literacy += learning_rate * (avg_smarter_literacy - self.financial_literacy)
-        # --- END: INFORMATION DIFFUSION LOGIC BLOCK --- 
 
         # --- Agent's Decision (Every Step) ---
         wealth_grid = self.model.wealth_grid
@@ -181,7 +179,6 @@ class SavingAgent(Agent):
         optimal_savings_from_policy = self.g[wealth_index]
         optimal_savings = optimal_savings_from_policy
 
-        # --- START: FINANCIAL LITERACY EFFECT BLOCK ---
         if self.model.information_diffusion_active:
             # 2. Get the "rational" savings plan from the planner's policy function
             _, g_planner = self.model.vfi_cache["planner"]
@@ -192,9 +189,7 @@ class SavingAgent(Agent):
             # An agent with literacy=0 will stick to their own biased goal.
             optimal_savings = ((1 - self.financial_literacy) * optimal_savings_from_policy) + \
                               (self.financial_literacy * rational_savings_goal)
-        # --- END: FINANCIAL LITERACY EFFECT BLOCK --
 
-        # --- START: PEER COMPARISON LOGIC BLOCK ---
         if self.model.peer_comparison_active and self.model.peer_comparison_strength > 0:
             neighbors = self.get_neighbors()
             if neighbors:
@@ -214,9 +209,7 @@ class SavingAgent(Agent):
 
                     # 5. The agent's new savings goal is based on this socially-adjusted consumption
                     optimal_savings = self.model.interest_rate * self.wealth - final_consumption
-        # --- END: PEER COMPARISON LOGIC BLOCK ---
 
-        # --- START: SOCIAL NORMS LOGIC BLOCK ---
         if self.model.social_norm_active and self.model.social_norm_strength > 0:
             neighbors = self.get_neighbors()
             if neighbors:
@@ -231,7 +224,6 @@ class SavingAgent(Agent):
                     # This represents a slow change in the agent's core preferences 
                     strength = self.model.social_norm_strength
                     self.beta = ((1 - strength) * self.beta) + (strength * neighborhood_beta_norm)
-        # --- END: SOCIAL NORMS LOGIC BLOCK ---
 
         self.policy_savings = optimal_savings_from_policy
         self.socially_adjusted_savings_goal = optimal_savings
@@ -289,24 +281,19 @@ def get_wealth_quantile(model, quantile):
         return 0
     return np.quantile(agent_wealths, q=quantile)
 
-# --- Standalone VFI Function---
+# --- VFI Function---
 def calculate_vfi_for_profile(profile_params, model_params):
     """
-    Performs VFI and writes its detailed progress to a unique log file.
+    Performs VFI and writes its progress to a log file.
     """
-    # Unpack parameters, including the new log_path
     log_path = profile_params['log_path']
     profile_name = profile_params['name']
     
-    # This try...finally block ensures that standard output is restored
-    # for the worker process, even if an error occurs.
-    original_stdout = sys.stdout
     try:
-        # Redirect all print statements within this block to the unique log file
+        # Redirect all print statements within this block to the log file
         with open(log_path, 'w') as log_file:
             sys.stdout = log_file
 
-            # --- Start of Original VFI Logic ---
             beta = profile_params['beta']
             delta = profile_params['delta']
             max_iterations = profile_params['vfi_iterations']
@@ -376,7 +363,6 @@ def calculate_vfi_for_profile(profile_params, model_params):
             print(f"Total value iteration took {total_time:.4f} seconds.")
             # Return results to the main process
             return (profile_name, V, g)
-            # --- End of Original VFI Logic ---
     finally:
         # Restore standard output for the worker process
         sys.stdout = original_stdout
@@ -560,7 +546,6 @@ class SavingModel(Model):
         print("Creating agent population...")
         global agent_profiles
 
-        # --- NEW: Explicitly manage agent IDs for network mapping ---
         agent_id_counter = 0
         for profile_name, count in population_composition.items():
             if profile_name not in agent_profiles:
@@ -647,7 +632,7 @@ class SavingModel(Model):
 
         print(f"Found {len(profiles_to_compute)} new unique agent profiles to calculate.")
         
-        # --- Prepare and run the parallel VFI, just like in __init__ ---
+        # --- Prepare and run the parallel VFI ---
         vfi_log_dir = os.path.join(output_dir_text, "vfi_logs")
         model_params = {
             'interest_rate': self.interest_rate, 'sigma': self.sigma,
@@ -892,7 +877,6 @@ with open(log_filepath, "w") as log_file:
 # --- RESTORE STDOUT TO THE CONSOLE ---
 sys.stdout = original_stdout
 
-# These final print statements will appear in your console
 print("Process finished successfully.")
 print(f"All data saved to '{output_dir_csv}'.")
 print(f"Full simulation log saved to '{log_filepath}'.")

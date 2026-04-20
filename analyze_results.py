@@ -32,7 +32,7 @@ palette = sns.color_palette("viridis", 5)
 GENERATE_PHASE_1_PLOTS = False
 GENERATE_PLOTS = True
 EXPERIMENTS_TO_PLOT = ["baseline", "info_diffusion_only", "peer_comparison_only", "social_norms_only", "all_interactions"] 
-RATES_TO_PROCESS = [1.05] 
+RATES_TO_PROCESS = [1.12] 
 
 # =============================================================================
 # --- 2. DATA LOADING AND AGGREGATION ---
@@ -356,43 +356,105 @@ def plot_final_distribution(data, metric, rate):
 
 def plot_wealth_by_profile(agent_data, rate):
     data_subset = agent_data[agent_data['Rate'] == rate]
-    experiments = data_subset['Experiment'].unique()
     
-    if 'baseline' not in experiments:
-        print("  > No se encontró 'baseline', omitiendo desglose de trayectoria.")
+    nombres_mecanismos = {
+        "info_diffusion_only": "Difusión de Información",
+        "peer_comparison_only": "Comparación entre Pares",
+        "social_norms_only": "Normas Sociales",
+        "all_interactions": "Todas las Interacciones"
+    }
+    
+    experimentos_validos = {k: v for k, v in nombres_mecanismos.items() if k in data_subset['Experiment'].unique()}
+    
+    if 'baseline' not in data_subset['Experiment'].unique() or not experimentos_validos:
+        print("  > Faltan datos o 'baseline' para generar la cuadrícula. Omitiendo.")
         return
-        
-    non_baseline = [e for e in experiments if e != 'baseline']
+
+    fig, axes = plt.subplots(2, 2, figsize=(16, 12))
+    axes = axes.flatten()
+    panel_labels = ['A', 'B', 'C', 'D']
     
-    for exp in non_baseline:
-        plt.figure(figsize=(14, 8))
+    global_profile_handles = []
+    global_profile_labels = []
+    
+    for i, (exp_key, exp_name) in enumerate(experimentos_validos.items()):
+        ax = axes[i]
         
-        exp_data = data_subset[data_subset['Experiment'].isin(['baseline', exp])]
+        exp_data = data_subset[data_subset['Experiment'].isin(['baseline', exp_key])]
+        
+        estilos_lineas = {exp_key: '', 'baseline': (4, 2)}
         
         sns.lineplot(data=exp_data, 
                      x='Step', 
                      y='Wealth', 
                      hue='Original_Profile',  
                      style='Experiment', 
+                     dashes=estilos_lineas, 
                      palette='tab10', 
-                     ci=None) 
+                     errorbar=None,
+                     ax=ax) 
         
-        plt.xlabel('Paso de Simulación', fontsize=12)
-        plt.ylabel('Riqueza Promedio', fontsize=12)
+        ax.set_title("") 
+        ax.set_xlabel('Paso de Simulación', fontsize=12)
+        ax.set_ylabel('Riqueza Promedio', fontsize=12)
         
-        # Movemos la leyenda fuera del cuadro para que no tape las líneas
-        plt.legend(title='Perfil y Experimento', bbox_to_anchor=(1.01, 1), loc='upper left')
-        plt.grid(True, which="both", ls="--")
-        plt.tight_layout()
+        ax.text(-0.06, 1.02, panel_labels[i], transform=ax.transAxes, 
+                fontsize=16, fontweight='bold', va='bottom')
         
-        filename = f"PHASE2_3_WealthByProfile_Baseline_vs_{exp}_R_{rate}.png"
-        plt.savefig(os.path.join(OUTPUT_DIR_PLOTS, filename))
-        plt.close()
-        print(f"  > Guardada trayectoria de riqueza: {filename}")
-
+        ax.spines['top'].set_visible(False)
+        ax.spines['right'].set_visible(False)
+        ax.grid(True, which="both", ls="--")
+        
+        handles, labels = ax.get_legend_handles_labels()
+        if handles:
+            ax.get_legend().remove()
+            
+            line_handles = []
+            line_labels = []
+            
+            is_experiment = False
+            for h, l in zip(handles, labels):
+                if l == 'Original_Profile':
+                    is_experiment = False
+                    continue
+                elif l == 'Experiment':
+                    is_experiment = True
+                    continue
+                    
+                if is_experiment:
+                    if l == exp_key:
+                        line_handles.append(h)
+                        line_labels.append(exp_name) 
+                    elif l == 'baseline':
+                        line_handles.append(h)
+                        line_labels.append('Línea Base')
+                else:
+                    if i == 0: 
+                        global_profile_handles.append(h)
+                        global_profile_labels.append(str(l).title())
+                        
+            local_legend = ax.legend(line_handles, line_labels, title='LÍNEAS:', 
+                                     loc='upper left', frameon=True, 
+                                     fontsize=10, title_fontsize=11)
+            local_legend.get_frame().set_edgecolor('black')
+            local_legend.get_frame().set_linewidth(0.5)
+            
+    for j in range(len(experimentos_validos), len(axes)):
+        axes[j].set_visible(False)
+        
+    if global_profile_handles:
+        fig.legend(global_profile_handles, global_profile_labels, title='PERFILES:', 
+                   loc='lower center', bbox_to_anchor=(0.5, 0.95), 
+                   ncol=5, frameon=False, fontsize=11, title_fontsize=12)
+        
+    plt.subplots_adjust(top=0.90, hspace=0.3, wspace=0.2)
+    
+    filename = f"Panel_Trayectorias_Perfiles_2x2_R_{rate}.png"
+    fig.savefig(os.path.join(OUTPUT_DIR_PLOTS, filename), bbox_inches='tight', dpi=300)
+    plt.close(fig)
+    print(f"  > Guardado Panel 2x2 de Trayectorias: {filename}")
 
 def plot_beta_by_profile(agent_data, rate):
-    # Lista estricta de experimentos a incluir
     allowed_exps = ['baseline', 'social_norms_only', 'all_interactions']
     data_subset = agent_data[(agent_data['Rate'] == rate) & (agent_data['Experiment'].isin(allowed_exps))]
     
@@ -660,7 +722,6 @@ def plot_verification_barplots(rate):
         print(f"  > ERROR: Could not find {verification_file}.")
         return
 
-    # We need the initial data from the main aggregated file
     agg_agent_path = os.path.join(OUTPUT_DIR_PLOTS, "aggregated_agent_data_all_runs.csv")
     try:
         agent_data = pd.read_csv(agg_agent_path)
@@ -669,7 +730,6 @@ def plot_verification_barplots(rate):
         print(f"  > ERROR: Could not find {agg_agent_path} for initial data.")
         return
 
-    # Filter for the specific rate
     data_to_plot_final = df_final[df_final['Rate'] == rate].copy()
     data_to_plot_initial = df_initial[df_initial['Rate'] == rate].copy()
     
@@ -715,10 +775,8 @@ def plot_verification_barplots(rate):
             plot_title_suffix = '(Escala Log)'
             plot_filename_suffix = "LOG"
             
-            # --- FIX HERE ---
             bin_edges = np.power(10.0, np.arange(-2, 8)) # Changed from 7 to 8
             bin_labels = [f"$10^{{{i}}}$ a $10^{{{i+1}}}$" for i in range(-2, 7)] # Changed from 6 to 7
-            # --- END FIX ---
             
             bin_order = bin_labels
             
@@ -828,7 +886,6 @@ def plot_verification_barplots(rate):
             xticks_locs = ax.get_xticks()
             xticklabels = [label.get_text() for label in ax.get_xticklabels()]
             
-            # Ensure we have the same number of ticks and labels
             if len(xticks_locs) != len(bin_order):
                  print(f"Warning: [VERIFICATION] Mismatch between number of ticks ({len(xticks_locs)}) and number of bins ({len(bin_order)}). Initial distribution overlay might be incorrect.")
             else:
@@ -867,7 +924,6 @@ def plot_verification_barplots(rate):
              labels.append('Initial (t=0)')
         by_label = dict(zip(labels, handles)) 
         ax.legend(by_label.values(), by_label.keys(), title='Experiment')
-        # --- End Legend Logic ---
         
         plt.tight_layout()
         
