@@ -1,4 +1,3 @@
-```
 # Saving and Dissaving with Hyperbolic Discounting - Agent-Based Model
 
 This repository contains an Agent-Based Model (ABM) simulating saving and dissaving behavior under hyperbolic discounting. Inspired by and implementing concepts from the paper "Saving and Dissaving with Hyperbolic Discounting" by Cao and Werning (2018), this model expands the theoretical framework by introducing social dynamics and heterogeneous agent profiles in a network setting.
