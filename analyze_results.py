@@ -217,8 +217,8 @@ def generate_statistical_table(model_data, agent_data, rate):
         is_not_beta_metric = metric_name != 'Final Avg. Beta'
 
         if data_source == 'model':
-            df_metric = final_model_data[['Experiment', col_name]].copy()
-            df_metric = df_metric[df_metric['Experiment'].isin(all_experiments)]
+            df_mod = final_model_data[final_model_data['Experiment'].isin(all_experiments)]
+            df_metric = df_mod.groupby(['Experiment', 'Replication'])[col_name].mean().reset_index()
         else:
             df_ag = final_agent_data[final_agent_data['Experiment'].isin(all_experiments)]
             df_metric = df_ag.groupby(['Experiment', 'Replication'])[col_name].mean().reset_index()
@@ -946,7 +946,10 @@ def perform_statistical_analysis(data, metric, rate):
         print("  > Experimento 'baseline' no encontrado. Omitiendo pruebas post-hoc.")
         return
         
-    df_metric = final_step_data[['Experiment', metric]].copy().dropna()
+    df_metric = (final_step_data.dropna(subset=[metric])
+                 .groupby(['Experiment', 'Replication'])[metric]
+                 .mean()
+                 .reset_index())
     
     df_metric[metric] = df_metric[metric].astype(float) + np.random.uniform(-1e-4, 1e-4, size=len(df_metric))
     
