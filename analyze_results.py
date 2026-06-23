@@ -44,10 +44,13 @@ sns.set_theme(style="whitegrid")
 palette = sns.color_palette("viridis", 5)
 
 # --- Analysis Configuration ---
-GENERATE_PHASE_1_PLOTS = False
+GENERATE_PHASE_1_PLOTS = True
 GENERATE_PLOTS = True
-EXPERIMENTS_TO_PLOT = ["baseline", "info_diffusion_only", "peer_comparison_only", "social_norms_only", "all_interactions"] 
-RATES_TO_PROCESS = [1.12] 
+EXPERIMENTS_TO_PLOT = ["baseline", "info_diffusion_only", "peer_comparison_only", "social_norms_only", "all_interactions"]
+# Interest-rate regimes to analyze. Leave empty ([]) to auto-detect and process
+# every rate present in the output data (e.g. both 1.05 and 1.12). Populate the
+# list (e.g. [1.12]) to restrict the analysis to specific regimes.
+RATES_TO_PROCESS = []
 
 
 # --- 2. DATA LOADING AND AGGREGATION ---
@@ -233,13 +236,21 @@ def generate_statistical_table(model_data, agent_data, rate):
                 try:
 
                     anova_res = pg.welch_anova(dv=col_name, between='Experiment', data=df_metric)
+                    print(f"\n[DIAG] Metric: {col_name}")
+                    print(f"[DIAG] df_metric shape: {df_metric.shape}")
+                    print(f"[DIAG] Rows per (Experiment, Replication):")
+                    print(df_metric.groupby('Experiment').size())
+                    print(f"[DIAG] Mean per Experiment:")
+                    print(df_metric.groupby('Experiment')[col_name].agg(['mean', 'std', 'count']))
+                    print(f"[DIAG] ANOVA result columns: {anova_res.columns.tolist()}")
+                    print(f"[DIAG] Full ANOVA: {anova_res.to_dict()}")
                     f_stat = anova_res['F'].iloc[0]
                     p_anova = anova_res['p_unc'].iloc[0]
                     
                     if p_anova < 0.05:
                         posthoc = pg.pairwise_gameshowell(dv=col_name, between='Experiment', data=df_metric)
                 except Exception as e:
-                    print(f"  > Advertencia: No se pudo calcular ANOVA/Games-Howell para {metric_name}. Motivo: {e}")
+                    print(f"  > Warning: Could not compute ANOVA/Games-Howell for {metric_name}. Reason: {e}")
 
         for exp in experiments_to_compare:
   
@@ -312,10 +323,10 @@ def plot_phase1_validation(v_g_dir, num_wealth_points):
                 g_func = np.load(filepath)
                 R_star = 1 + (1 - params['delta']) / (params['beta'] * params['delta'])
                 plt.plot(wealth_grid, g_func, label=f'{name.title()} (R* ≈ {R_star:.2f})')
-        plt.plot(wealth_grid, wealth_grid, 'k--', label="k' = k (Ahorro Neto Cero)", alpha=0.6)
-        plt.title(f'Funciones de Política de Ahorro g(k) para R = {rate} (escala log-log)', fontsize=16)
-        plt.xlabel("Riqueza Actual (k)", fontsize=12)
-        plt.ylabel("Riqueza del Siguiente Periodo (k')", fontsize=12)
+        plt.plot(wealth_grid, wealth_grid, 'k--', label="k' = k (Zero net saving)", alpha=0.6)
+        plt.title(f'Saving policy functions for R = {rate} (log-log) scale', fontsize=16)
+        plt.xlabel("Current wealth (k)", fontsize=12)
+        plt.ylabel("Next-period wealth (k')", fontsize=12)
         plt.xscale('log')
         plt.yscale('log')
         plt.legend()
@@ -344,10 +355,10 @@ def plot_time_series_comparison(data, metric, rate, target_ax=None):
         
     sns.lineplot(data=plot_data, x='Step', y=metric, hue='Experiment', palette=palette_to_use, ci=ci_to_use, ax=ax)
     
-    ax.set_xlabel('Paso de Simulación', fontsize=11)
+    ax.set_xlabel('Simulation Step', fontsize=11)
     ax.set_ylabel(metric.replace('_', ' '), fontsize=11)
 
-    ax.legend(title='Experimento')
+    ax.legend(title='Experiment')
     
     if save_plot:
         plt.tight_layout()
@@ -358,8 +369,8 @@ def plot_final_distribution(data, metric, rate):
     final_step_data = data[(data['Rate'] == rate) & (data['Step'] == SIMULATION_STEPS - 1)]
     plt.figure(figsize=(14, 8))
     sns.boxplot(data=final_step_data, x='Experiment', y=metric, palette='viridis')
-    plt.title(f'Distribución Final de {metric.replace("_", " ")} (Paso {SIMULATION_STEPS}, R = {rate})', fontsize=16)
-    plt.xlabel('Experimento', fontsize=12)
+    plt.title(f'Final distribution of {metric.replace("_", " ")} (Step {SIMULATION_STEPS}, R = {rate})', fontsize=16)
+    plt.xlabel('Experiment', fontsize=12)
     plt.ylabel(f'{metric.replace("_", " ")} Final', fontsize=12)
     plt.xticks(rotation=45, ha='right')
     plt.tight_layout()
@@ -371,16 +382,16 @@ def plot_wealth_by_profile(agent_data, rate):
     data_subset = agent_data[agent_data['Rate'] == rate]
     
     nombres_mecanismos = {
-        "info_diffusion_only": "Difusión de Información",
-        "peer_comparison_only": "Comparación entre Pares",
-        "social_norms_only": "Normas Sociales",
-        "all_interactions": "Todas las Interacciones"
+        "info_diffusion_only": "Information Diffusion",
+        "peer_comparison_only": "Peer Comparison",
+        "social_norms_only": "Social Norms",
+        "all_interactions": "All Interactions"
     }
     
-    experimentos_validos = {k: v for k, v in nombres_mecanismos.items() if k in data_subset['Experiment'].unique()}
+    Experiments_validos = {k: v for k, v in nombres_mecanismos.items() if k in data_subset['Experiment'].unique()}
     
-    if 'baseline' not in data_subset['Experiment'].unique() or not experimentos_validos:
-        print("  > Faltan datos o 'baseline' para generar la cuadrícula. Omitiendo.")
+    if 'baseline' not in data_subset['Experiment'].unique() or not Experiments_validos:
+        print("  > Missing data or 'baseline' needed to generate the grid. Skipping.")
         return
 
     fig, axes = plt.subplots(2, 2, figsize=(16, 12))
@@ -390,7 +401,7 @@ def plot_wealth_by_profile(agent_data, rate):
     global_profile_handles = []
     global_profile_labels = []
     
-    for i, (exp_key, exp_name) in enumerate(experimentos_validos.items()):
+    for i, (exp_key, exp_name) in enumerate(Experiments_validos.items()):
         ax = axes[i]
         
         exp_data = data_subset[data_subset['Experiment'].isin(['baseline', exp_key])]
@@ -408,8 +419,8 @@ def plot_wealth_by_profile(agent_data, rate):
                      ax=ax) 
         
         ax.set_title("") 
-        ax.set_xlabel('Paso de Simulación', fontsize=12)
-        ax.set_ylabel('Riqueza Promedio', fontsize=12)
+        ax.set_xlabel('Simulation Step', fontsize=12)
+        ax.set_ylabel('Average Wealth', fontsize=12)
         
         ax.text(-0.06, 1.02, panel_labels[i], transform=ax.transAxes, 
                 fontsize=16, fontweight='bold', va='bottom')
@@ -440,23 +451,23 @@ def plot_wealth_by_profile(agent_data, rate):
                         line_labels.append(exp_name) 
                     elif l == 'baseline':
                         line_handles.append(h)
-                        line_labels.append('Línea Base')
+                        line_labels.append('Baseline')
                 else:
                     if i == 0: 
                         global_profile_handles.append(h)
                         global_profile_labels.append(str(l).title())
                         
-            local_legend = ax.legend(line_handles, line_labels, title='LÍNEAS:', 
+            local_legend = ax.legend(line_handles, line_labels, title='LINES:', 
                                      loc='upper left', frameon=True, 
                                      fontsize=10, title_fontsize=11)
             local_legend.get_frame().set_edgecolor('black')
             local_legend.get_frame().set_linewidth(0.5)
             
-    for j in range(len(experimentos_validos), len(axes)):
+    for j in range(len(Experiments_validos), len(axes)):
         axes[j].set_visible(False)
         
     if global_profile_handles:
-        fig.legend(global_profile_handles, global_profile_labels, title='PERFILES:', 
+        fig.legend(global_profile_handles, global_profile_labels, title='PROFILES:', 
                    loc='lower center', bbox_to_anchor=(0.5, 0.95), 
                    ncol=5, frameon=False, fontsize=11, title_fontsize=12)
         
@@ -472,22 +483,22 @@ def plot_beta_by_profile(agent_data, rate):
     data_subset = agent_data[(agent_data['Rate'] == rate) & (agent_data['Experiment'].isin(allowed_exps))]
     
     if data_subset.empty:
-        print(f"  > No hay datos para los experimentos requeridos en Beta para R={rate}.")
+        print(f"  > No data for the required experiments in Beta for R={rate}.")
         return
         
     plt.figure(figsize=(14, 8))
     sns.lineplot(data=data_subset, x='Step', y='Beta', hue='Original_Profile', style='Experiment', palette='tab10', ci=None)
     
-    plt.xlabel('Paso de Simulación', fontsize=12)
-    plt.ylabel('Beta Promedio', fontsize=12)
-    plt.legend(title='Perfil y Experimento', bbox_to_anchor=(1.01, 1), loc='upper left')
+    plt.xlabel('Simulation Step', fontsize=12)
+    plt.ylabel('Average Beta', fontsize=12)
+    plt.legend(title='PROFILE AND Experiment', bbox_to_anchor=(1.01, 1), loc='upper left')
     plt.grid(True, which="both", ls="--")
     plt.tight_layout()
     
     filename = f"PHASE2_3_BetaByProfile_Filtrado_R_{rate}.png"
     plt.savefig(os.path.join(OUTPUT_DIR_PLOTS, filename))
     plt.close()
-    print(f"  > Guardada trayectoria de Beta filtrada para R={rate}")
+    print(f"  > Saved filtered Beta trajectory for R={rate}")
 
 
 def plot_final_wealth_distribution_barplot(agent_data, rate, log_scale=True, target_ax=None):
@@ -537,7 +548,7 @@ def plot_final_wealth_distribution_barplot(agent_data, rate, log_scale=True, tar
             binned_data_initial.append(counts)
             
         if not binned_data_all_reps: return
-        # CORRECCIÓN AQUÍ: Usamos concat para la lista de DataFrames
+        # Use concat for the list of DataFrames
         binned_df = pd.concat(binned_data_all_reps, ignore_index=True)
         binned_df_initial = pd.concat(binned_data_initial, ignore_index=True) if binned_data_initial else pd.DataFrame()
             
@@ -565,7 +576,7 @@ def plot_final_wealth_distribution_barplot(agent_data, rate, log_scale=True, tar
                     binned_data_initial.append({'Replication': rep, 'Wealth Bin Label': f'{bin_centers[i]:.1e}', 'Count': count})
 
         if not binned_data_all_reps: return
-        # CORRECCIÓN AQUÍ: Usamos DataFrame para la lista de diccionarios
+        # Use DataFrame for the list of dictionaries
         binned_df = pd.DataFrame(binned_data_all_reps)
         binned_df_initial = pd.DataFrame(binned_data_initial)
         bin_order = binned_df['Wealth Bin Label'].unique()
@@ -595,8 +606,8 @@ def plot_final_wealth_distribution_barplot(agent_data, rate, log_scale=True, tar
                     ax.errorbar(x_pos, m, yerr=s, fmt='none', ecolor='black', elinewidth=1.0, capsize=3, label='_nolegend_')
 
     ax.set_title("") 
-    ax.set_xlabel('Riqueza (Escala Log)' if log_scale else 'Riqueza (Escala Lineal)', fontsize=12)
-    ax.set_ylabel('Número de Agentes', fontsize=12)
+    ax.set_xlabel('Wealth (Log Scale)' if log_scale else 'Wealth (linear scale)', fontsize=12)
+    ax.set_ylabel('Number of Agents', fontsize=12)
     ax.tick_params(axis='x', rotation=45, labelsize=10)
     
     handles, labels = ax.get_legend_handles_labels()
@@ -605,7 +616,7 @@ def plot_final_wealth_distribution_barplot(agent_data, rate, log_scale=True, tar
         labels.append('Initial (t=0)')
     
     by_label = dict(zip(labels, handles))
-    ax.legend(by_label.values(), by_label.keys(), title='Experimento', bbox_to_anchor=(1.01, 1), loc='upper left')
+    ax.legend(by_label.values(), by_label.keys(), title='Experiment', bbox_to_anchor=(1.01, 1), loc='upper left')
     
     if save_plot:
         plt.tight_layout()
@@ -649,10 +660,10 @@ def plot_final_consumption_distribution_barplot(agent_data, rate, target_ax=None
     sns.barplot(data=binned_df, x='Consumption Bin Label', y='Count', hue='Experiment', order=bin_labels, palette=palette_to_use, ci='sd', ax=ax)
     
     ax.set_title("") 
-    ax.set_xlabel('Consumo (Escala Log)', fontsize=12)
-    ax.set_ylabel('Número de Agentes', fontsize=12)
+    ax.set_xlabel('Consumption (Log Scale)', fontsize=12)
+    ax.set_ylabel('Number of Agents', fontsize=12)
     ax.tick_params(axis='x', rotation=45, labelsize=10)
-    ax.legend(title='Experimento', bbox_to_anchor=(1.01, 1), loc='upper left')
+    ax.legend(title='Experiment', bbox_to_anchor=(1.01, 1), loc='upper left')
     
     if save_plot:
         plt.tight_layout()
@@ -660,7 +671,7 @@ def plot_final_consumption_distribution_barplot(agent_data, rate, target_ax=None
         plt.close()
 
 def plot_composite_time_series(data, rate):
-    """Crea panel 3x1 (vertical) para Riqueza, Consumo y Gini con formato APA (A, B, C)"""
+    """Creates a 3x1 (vertical) panel for Wealth, Consumption and Gini in APA format (A, B, C)"""
     fig, axes = plt.subplots(3, 1, figsize=(14, 20)) 
     
     metrics = ["Average Wealth", "Average Consumption", "Gini_Coefficient"]
@@ -680,10 +691,10 @@ def plot_composite_time_series(data, rate):
             if legend:
                 legend.remove()
         else:
-            axes[i].legend(title='Experimento', bbox_to_anchor=(1.01, 1), loc='upper left', frameon=False)
+            axes[i].legend(title='Experiment', bbox_to_anchor=(1.01, 1), loc='upper left', frameon=False)
                 
     plt.subplots_adjust(hspace=0.3) 
-    filename = f'Panel_Agregados_Vertical_Riqueza_Consumo_Gini_R_{rate}.png'
+    filename = f'Panel_Agregados_Vertical_Wealth_Consumo_Gini_R_{rate}.png'
     
     fig.savefig(os.path.join(OUTPUT_DIR_PLOTS, filename), bbox_inches='tight', dpi=300)
     plt.close(fig)
@@ -691,18 +702,18 @@ def plot_composite_time_series(data, rate):
 
 
 def plot_composite_distributions(agent_data, rate):
-    """Crea panel 2x1 para Distribuciones con formato APA (A, B)"""
+    """Creates a 2x1 panel for Distributions in APA format (A, B)"""
     fig, axes = plt.subplots(2, 1, figsize=(14, 16)) 
     
-    # Riqueza LOG
+    # Wealth LOG
     plot_final_wealth_distribution_barplot(agent_data, rate, log_scale=True, target_ax=axes[0])
-    # Consumo LOG
+    # Consumption LOG
     plot_final_consumption_distribution_barplot(agent_data, rate, target_ax=axes[1])
     
     panel_labels = ['A', 'B']
     
     for i, ax in enumerate(axes):
-        # Añadir la letra identificadora del panel (Formato APA)
+        # Add the panel identifier letter (APA format)
         ax.text(-0.06, 1.02, panel_labels[i], transform=ax.transAxes, 
                 fontsize=16, fontweight='bold', va='bottom')
         
@@ -781,7 +792,7 @@ def plot_verification_barplots(rate):
         bin_order = []
 
         if log_scale:
-            plot_title_suffix = '(Escala Log)'
+            plot_title_suffix = '(Log Scale)'
             plot_filename_suffix = "LOG"
             
             bin_edges = np.power(10.0, np.arange(-2, 8)) # Changed from 7 to 8
@@ -816,7 +827,7 @@ def plot_verification_barplots(rate):
             binned_df_initial = pd.concat(binned_data_initial, ignore_index=True) if binned_data_initial else pd.DataFrame()
         
         else: 
-            plot_title_suffix = '(Escala Lineal)'
+            plot_title_suffix = '(Linear Scale)'
             plot_filename_suffix = "LINEAR"
 
             data_min = FLOOR_VALUE
@@ -914,8 +925,8 @@ def plot_verification_barplots(rate):
                                      ecolor='black', elinewidth=1.0, capsize=3, label='_nolegend_')
                           
         plt.title(f'[VERIFICATION] Final Wealth Avg. Distribution {plot_title_suffix}, R = {rate}', fontsize=16)
-        plt.xlabel('Riqueza', fontsize=12) # Your label
-        plt.ylabel('Número de Agentes', fontsize=12) # Your label
+        plt.xlabel('Wealth', fontsize=12) # Your label
+        plt.ylabel('Number of Agents', fontsize=12) # Your label
         
         plt.xticks(rotation=45, ha='right', fontsize=9)
         
@@ -935,15 +946,15 @@ def plot_verification_barplots(rate):
         print(f"  > Saved VERIFICATION Avg. Dist. Barplot ({plot_filename_suffix} scale) to: {filename}")
 
 def perform_statistical_analysis(data, metric, rate):
-    print(f"\n--- Análisis Estadístico (Welch + Games-Howell) para '{metric}' en R={rate} (Salida en Consola) ---")
+    print(f"\n--- Statistical Analysis (Welch + Games-Howell) for '{metric}' at R={rate} (Console Output) ---")
     final_step_data = data[(data['Rate'] == rate) & (data['Step'] == SIMULATION_STEPS - 1)]
     experiments = final_step_data['Experiment'].unique()
     
     if len(experiments) < 2:
-        print(f"  > Solo se encontró un grupo experimental. Omitiendo pruebas.")
+        print(f"  > Only one experimental group found. Skipping tests.")
         return
     if 'baseline' not in experiments:
-        print("  > Experimento 'baseline' no encontrado. Omitiendo pruebas post-hoc.")
+        print("  > Experiment 'baseline' not found. Skipping post-hoc tests.")
         return
         
     df_metric = (final_step_data.dropna(subset=[metric])
@@ -961,16 +972,16 @@ def perform_statistical_analysis(data, metric, rate):
         
         p_cols = [c for c in anova_res.columns if c.lower() in ['p_unc', 'p-unc', 'p-val', 'pval', 'pvalue', 'p', 'pr(>f)']]
         if not p_cols:
-            print(f"DEBUG: No se reconoció la columna P. Columnas de pingouin: {anova_res.columns.tolist()}")
+            print(f"DEBUG: Could not recognize the P column. Pingouin columns: {anova_res.columns.tolist()}")
             return
             
         p_val_anova = anova_res[p_cols[0]].iloc[0]
         
         f_val_str = f"{f_val:.4f}" if isinstance(f_val, (int, float)) else f_val
-        print(f"Resultado ANOVA de Welch: Estadístico F = {f_val_str}, valor p = {p_val_anova:.4e}")
+        print(f"Welch ANOVA result: F statistic = {f_val_str}, p value = {p_val_anova:.4e}")
         
         if p_val_anova < 0.05:
-            print("El ANOVA de Welch es significativo. Realizando post-hoc de Games-Howell contra el baseline...")
+            print("Welch ANOVA is significant. Performing Games-Howell post-hoc against baseline...")
             posthoc = pg.pairwise_gameshowell(dv=metric, between='Experiment', data=df_metric)
             
             for exp in experiments:
@@ -981,13 +992,13 @@ def perform_statistical_analysis(data, metric, rate):
                         p_cols_gh = [c for c in match.columns if c.lower() in ['p_unc', 'p-unc', 'pval', 'p-val', 'pvalue', 'p']]
                         if p_cols_gh:
                             p_val_gh = match[p_cols_gh[0]].iloc[0]
-                            significance = "SIGNIFICATIVO" if p_val_gh < 0.05 else "no significativo"
-                            print(f"  - Games-Howell '{exp}' vs 'baseline': valor p = {p_val_gh:.4e} ({significance})")
+                            significance = "SIGNIFICANT" if p_val_gh < 0.05 else "not significant"
+                            print(f"  - Games-Howell '{exp}' vs 'baseline': p value = {p_val_gh:.4e} ({significance})")
         else:
-            print("El ANOVA de Welch no es significativo. No proceden pruebas post-hoc.")
+            print("Welch ANOVA is not significant. No post-hoc tests are warranted.")
             
     except Exception as e:
-        print(f"Error realizando el análisis estadístico para {metric}: {e}")
+        print(f"Error performing statistical analysis for {metric}: {e}")
 
 
 # --- 5. MAIN EXECUTION BLOCK ---
@@ -1084,24 +1095,24 @@ if __name__ == "__main__":
         generate_summary_table(rate_model_data, rate_agent_data, interest_rate) 
         generate_statistical_table(rate_model_data, rate_agent_data, interest_rate)
         
-        print(f"\n--- Ejecutando análisis estadístico en consola para R = {interest_rate} ---")
+        print(f"\n--- Running console statistical analysis for R = {interest_rate} ---")
         model_metrics_to_plot = ["Average Wealth", "Gini_Coefficient", "Average Consumption", "Average Savings"]
         for metric in model_metrics_to_plot:
             perform_statistical_analysis(rate_model_data, metric, interest_rate)
 
 
         if GENERATE_PLOTS:
-            print(f"\n--- Generando Paneles Compuestos para R = {interest_rate} ---")
+            print(f"\n--- Generating Composite Panels for R = {interest_rate} ---")
             
             plot_composite_time_series(rate_model_data, interest_rate)
             plot_composite_distributions(rate_agent_data, interest_rate)
 
-            print(f"--- Generando gráficas por perfil para R = {interest_rate} ---")
+            print(f"--- Generating per-profile plots for R = {interest_rate} ---")
             plot_wealth_by_profile(rate_agent_data, interest_rate)
             plot_beta_by_profile(rate_agent_data, interest_rate)
             
             plot_verification_barplots(interest_rate) 
             
         else:
-            print(f"\n--- Omitiendo generación de gráficas para R = {interest_rate} (GENERATE_PLOTS = False) ---")
+            print(f"\n--- Skipping plot generation for R = {interest_rate} (GENERATE_PLOTS = False) ---")
     print("\n========================= ANALYSIS COMPLETE =========================")

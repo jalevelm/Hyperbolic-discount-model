@@ -23,12 +23,8 @@ from mesa.datacollection import DataCollector
 import random
 import time
 import numpy as np
-import matplotlib.pyplot as plt
-import scipy.optimize as optimize  
 from joblib import Parallel, delayed
 import pandas as pd
-import cProfile
-import pstats
 import math
 import networkx as nx
 
@@ -157,13 +153,12 @@ class SavingAgent(Agent):
         """
         Advances the agent by one time step, printing detailed logs of its actions.
         """
-        if self.step_count == 0:
-            print(f"Agent {self.unique_id} ({self.profile_name}): First Step - Beta: {self.beta}, Delta: {self.delta}, R_star: {self.R_star}")
-            neighbors = self.get_neighbors()
-            print(f"Agent {self.unique_id}: Has {len(neighbors)} neighbors.")
-        
-        print(f"Agent {self.unique_id} ({self.profile_name}): Step start. Wealth: {self.wealth:.4f}, Previous Savings: {self.previous_savings}")
-        print(f"Agent {self.unique_id}: R = {self.model.interest_rate}, R_star = {self.R_star}")
+        if self.model.verbose:
+            if self.step_count == 0:
+                print(f"Agent {self.unique_id} ({self.profile_name}): First Step - Beta: {self.beta}, Delta: {self.delta}, R_star: {self.R_star}")
+                print(f"Agent {self.unique_id}: Has {len(self.get_neighbors())} neighbors.")
+            print(f"Agent {self.unique_id} ({self.profile_name}): Step start. Wealth: {self.wealth:.4f}, Previous Savings: {self.previous_savings}")
+            print(f"Agent {self.unique_id}: R = {self.model.interest_rate}, R_star = {self.R_star}")
 
         try:
             self.V, self.g = self.model.vfi_cache[self.profile_name]
@@ -248,24 +243,26 @@ class SavingAgent(Agent):
 
 
         self.consumption = max(wealth_with_interest - self.savings, 1e-9)
-        percentage_consumed = (self.consumption / (wealth_with_interest + 1e-9)) * 100
-        percentage_saved = (self.savings / (wealth_with_interest + 1e-9)) * 100
 
-        print(f"Agent {self.unique_id}: Step {self.step_count}")
-        print(f"  Previous Wealth: {self.previous_wealth:.4f}")
-        print(f"  Optimal Savings (from policy): {optimal_savings_from_policy:.4f}")
-        if abs(optimal_savings - optimal_savings_from_policy) > 1e-6:
-             print(f"  Socially-Adjusted Savings Goal: {optimal_savings:.4f}")
-        print(f"  Calculated Savings (after clipping): {self.savings:.4f}")
-        print(f"  Consumption: {self.consumption:.4f}")
+        if self.model.verbose:
+            print(f"Agent {self.unique_id}: Step {self.step_count}")
+            print(f"  Previous Wealth: {self.previous_wealth:.4f}")
+            print(f"  Optimal Savings (from policy): {optimal_savings_from_policy:.4f}")
+            if abs(optimal_savings - optimal_savings_from_policy) > 1e-6:
+                print(f"  Socially-Adjusted Savings Goal: {optimal_savings:.4f}")
+            print(f"  Calculated Savings (after clipping): {self.savings:.4f}")
+            print(f"  Consumption: {self.consumption:.4f}")
         
         # --- State Updates ---
         self.previous_wealth = self.wealth
         self.wealth = self.savings
         self.previous_savings = self.savings
 
-        print(f"Agent {self.unique_id}: Step end. | Total resources: {wealth_with_interest:.2f}, Consumption: {self.consumption:.2f}, Savings: {self.savings:.2f}, Wealth end of step: {self.wealth:.2f}")
-        print(f"Percentage consumed: {percentage_consumed:.2f}%, percentage saved: {percentage_saved:.2f}%\n")
+        if self.model.verbose:
+            percentage_consumed = (self.consumption / (wealth_with_interest + 1e-9)) * 100
+            percentage_saved = (self.savings / (wealth_with_interest + 1e-9)) * 100
+            print(f"Agent {self.unique_id}: Step end. | Total resources: {wealth_with_interest:.2f}, Consumption: {self.consumption:.2f}, Savings: {self.savings:.2f}, Wealth end of step: {self.wealth:.2f}")
+            print(f"Percentage consumed: {percentage_consumed:.2f}%, percentage saved: {percentage_saved:.2f}%\n")
 
         self.consumption_history.append(self.consumption)
         self.wealth_history.append(self.wealth)
@@ -300,6 +297,8 @@ def calculate_vfi_for_profile(profile_params, model_params):
     """
     log_path = profile_params['log_path']
     profile_name = profile_params['name']
+
+    worker_stdout = sys.stdout 
     
     try:
         # Redirect all print statements within this block to the log file
@@ -377,7 +376,7 @@ def calculate_vfi_for_profile(profile_params, model_params):
             return (profile_name, V, g)
     finally:
         # Restore standard output for the worker process
-        sys.stdout = original_stdout
+        sys.stdout = worker_stdout
 
 class SavingModel(Model):
     """
@@ -399,11 +398,19 @@ class SavingModel(Model):
                  peer_comparison_strength=0.05,
                  social_norm_strength=0.05,
                  information_diffusion_strength=0.05,
-                 vfi_recalculation_interval=20,
-                 vfi_cache=None):
+                 vfi_recalculation_interval=25,
+                 vfi_cache=None,
+                 verbose=False):
 
         super().__init__(seed=seed)
-        np.random.seed(seed)    
+        np.random.seed(seed)
+        # When False, suppresses per-agent / per-step / per-iteration debug
+        # output. Run-level progress messages are always shown.
+        self.verbose = verbose
+        self.min_wealth = 1e-6
+        self.max_wealth = 1000001
+        self.borrowing_limit = 0
+        self.wealth_grid = np.geomspace(self.min_wealth, self.max_wealth, num_wealth_points)
 
         if vfi_cache:
             print("--- Loading pre-computed VFI cache. ---")
@@ -416,11 +423,10 @@ class SavingModel(Model):
             unique_profiles_to_compute = population_composition.keys()
             vfi_log_dir = os.path.join(output_dir_text, "vfi_logs")
             os.makedirs(vfi_log_dir, exist_ok=True)
-            wealth_grid_for_vfi = np.geomspace(1e-6, 1000001, num_wealth_points)
             model_params = {
                 'interest_rate': interest_rate, 'sigma': sigma,
-                'wealth_grid': wealth_grid_for_vfi, 
-                'borrowing_limit': 0
+                'wealth_grid': self.wealth_grid,
+                'borrowing_limit': self.borrowing_limit
             }
             profile_params_list = []
             global agent_profiles
@@ -442,10 +448,7 @@ class SavingModel(Model):
         self.num_agents = sum(population_composition.values())
         self.interest_rate = interest_rate
         self.sigma = sigma
-        self.max_wealth = 1000001
-        self.borrowing_limit = 0
         self.wealth_dist = wealth_dist
-        self.wealth_grid = np.geomspace(1e-6, self.max_wealth, num_wealth_points)
         self.peer_comparison_active = peer_comparison_active
         self.social_norm_active = social_norm_active
         self.information_diffusion_active = information_diffusion_active
@@ -657,10 +660,12 @@ class SavingModel(Model):
            self.schedule.steps % self.vfi_recalculation_interval == 0:
             self._recalculate_vfi_for_changed_agents()
 
-        print("Model step start", flush=True)  # Debug print
+        if self.verbose:
+            print("Model step start", flush=True)
         self.datacollector.collect(self)    # Collect data
         self.schedule.step()    # Advance the agent (and scheduler)
-        print("Model step end", flush=True)  # Debug print
+        if self.verbose:
+            print("Model step end", flush=True)
 
 
 # ----------------------------------------------------------
@@ -701,6 +706,10 @@ interest_rates_to_test = [1.05, 1.12]
 SIMULATION_STEPS = 200
 NUM_WEALTH_POINTS = 1000
 
+# When True, prints detailed per-agent / per-step debug output to the log.
+# Leave False for full production runs to keep the log readable.
+VERBOSE = False
+
 experiments = {
     "baseline": {
         "peer_comparison_active": False, "social_norm_active": False, "information_diffusion_active": False
@@ -719,147 +728,151 @@ experiments = {
     }
 }
 
-experiments_to_run = ["baseline"]
+experiments_to_run = ["baseline", "peer_comparison_only", "social_norms_only", "info_diffusion_only", "all_interactions"]
 
+
+if __name__ == "__main__":
 # --- 2. Setup Output Directories ---
-output_dir_csv = "output_csv"
-os.makedirs(output_dir_csv, exist_ok=True)
-output_dir_text = "output_text"
-os.makedirs(output_dir_text, exist_ok=True)
-log_filepath = os.path.join(output_dir_text, "simulation_run_log.txt")
+    output_dir_csv = "output_csv"
+    os.makedirs(output_dir_csv, exist_ok=True)
+    output_dir_text = "output_text"
+    os.makedirs(output_dir_text, exist_ok=True)
+    log_filepath = os.path.join(output_dir_text, "simulation_run_log.txt")
 
-print(f"Starting simulation. All detailed output will be saved to: {log_filepath}")
+    print(f"Starting simulation. All detailed output will be saved to: {log_filepath}")
 
-# --- 3. Run Simulation with Logging ---
+    # --- 3. Run Simulation with Logging ---
 
-with open(log_filepath, "w") as log_file:
-    # --- REDIRECT STDOUT TO THE LOG FILE ---
-    original_stdout = sys.stdout
-    sys.stdout = log_file
+    with open(log_filepath, "w") as log_file:
+        # --- REDIRECT STDOUT TO THE LOG FILE ---
+        original_stdout = sys.stdout
+        sys.stdout = log_file
 
-    print("="*50)
-    print("SIMULATION RUN STARTED...")
-    print(f"Current Time: {time.ctime()}")
-    print("="*50 + "\n")
+        print("="*50)
+        print("SIMULATION RUN STARTED...")
+        print(f"Current Time: {time.ctime()}")
+        print("="*50 + "\n")
 
-    NUM_REPLICATIONS = 30
-    seeds = range(1, NUM_REPLICATIONS + 1)
+        NUM_REPLICATIONS = 30
+        seeds = range(1, NUM_REPLICATIONS + 1)
 
-    total_runs = len(interest_rates_to_test) * len(experiments_to_run) * NUM_REPLICATIONS
-    completed_runs = 0
-    start_time = time.time()
+        total_runs = len(interest_rates_to_test) * len(experiments_to_run) * NUM_REPLICATIONS
+        completed_runs = 0
+        start_time = time.time()
 
-    # Loop through each experimental condition
-    for rate in interest_rates_to_test:
+        # Loop through each experimental condition
+        for rate in interest_rates_to_test:
 
-        print(f"\\n{'='*25} PRE-COMPUTING VFI FOR R = {rate} {'='*25}")
-        temp_model = SavingModel(
-            population_composition=population_to_simulate,
-            interest_rate=rate,
-            sigma=sigma,
-            wealth_dist=wealth_dist,
-            num_wealth_points=NUM_WEALTH_POINTS,
-            network='watts_strogatz',  # Specify the network type
-            network_params={'k': 4, 'p': 0.1}, # Define the network's parameters
-            seed=1
-        )
+            print(f"\\n{'='*25} PRE-COMPUTING VFI FOR R = {rate} {'='*25}")
+            temp_model = SavingModel(
+                population_composition=population_to_simulate,
+                interest_rate=rate,
+                sigma=sigma,
+                wealth_dist=wealth_dist,
+                num_wealth_points=NUM_WEALTH_POINTS,
+                network='watts_strogatz',  # Specify the network type
+                network_params={'k': 4, 'p': 0.1}, # Define the network's parameters
+                seed=1
+            )
 
-        precomputed_cache = temp_model.vfi_cache
-        print("--- VFI Cache Generation Complete ---")
+            precomputed_cache = temp_model.vfi_cache
+            print("--- VFI Cache Generation Complete ---")
 
-        print("--- Exporting V and g functions from cache... ---")
-        output_dir_v_g = os.path.join(output_dir_csv, "v_g_functions")
-        os.makedirs(output_dir_v_g, exist_ok=True)
-        for profile_name, (V, g) in precomputed_cache.items():
-            v_g_base_filename = f"R_{rate}_{profile_name}"
-            v_func_path = os.path.join(output_dir_v_g, f"{v_g_base_filename}_value_function.npy")
-            g_func_path = os.path.join(output_dir_v_g, f"{v_g_base_filename}_policy_function.npy")
-            np.save(v_func_path, V)
-            np.save(g_func_path, g)
-            print(f"  > Saved V and g for profile '{profile_name}'")
+            print("--- Exporting V and g functions from cache... ---")
+            output_dir_v_g = os.path.join(output_dir_csv, "v_g_functions")
+            os.makedirs(output_dir_v_g, exist_ok=True)
+            for profile_name, (V, g) in precomputed_cache.items():
+                v_g_base_filename = f"R_{rate}_{profile_name}"
+                v_func_path = os.path.join(output_dir_v_g, f"{v_g_base_filename}_value_function.npy")
+                g_func_path = os.path.join(output_dir_v_g, f"{v_g_base_filename}_policy_function.npy")
+                np.save(v_func_path, V)
+                np.save(g_func_path, g)
+                print(f"  > Saved V and g for profile '{profile_name}'")
 
 
-        
-
-        for run_id, seed in enumerate(seeds):
-
-            print(f"\n{'#'*25} STARTING REPLICATION {run_id + 1}/{NUM_REPLICATIONS} (Seed: {seed}) {'#'*25}")
-
-            for run_name, settings in experiments.items():
-                if run_name not in experiments_to_run:
-                    print(f"\n--- SKIPPING EXPERIMENT: '{run_name}' ---")
-                    continue
-                print(f"\n{'='*20} RUNNING EXPERIMENT: '{run_name}' | Interest Rate (R) = {rate} {'='*20}")
             
-                model = SavingModel(
-                    population_composition=population_to_simulate,
-                    interest_rate=rate,
-                    sigma=sigma,
-                    wealth_dist=wealth_dist,
-                    num_wealth_points=NUM_WEALTH_POINTS,
-                    network='watts_strogatz', 
-                    network_params={'k': 4, 'p': 0.1},
-                    seed=seed,
-                    peer_comparison_active=settings["peer_comparison_active"],
-                    social_norm_active=settings["social_norm_active"],
-                    information_diffusion_active=settings["information_diffusion_active"],
-                    social_norm_strength=0.15,
-                    peer_comparison_strength=0.15,
-                    information_diffusion_strength=0.15,
-                    vfi_recalculation_interval=10,
-                    vfi_cache=precomputed_cache
-                )   
+
+            for run_id, seed in enumerate(seeds):
+
+                print(f"\n{'#'*25} STARTING REPLICATION {run_id + 1}/{NUM_REPLICATIONS} (Seed: {seed}) {'#'*25}")
+
+                for run_name, settings in experiments.items():
+                    if run_name not in experiments_to_run:
+                        print(f"\n--- SKIPPING EXPERIMENT: '{run_name}' ---")
+                        continue
+                    print(f"\n{'='*20} RUNNING EXPERIMENT: '{run_name}' | Interest Rate (R) = {rate} {'='*20}")
                 
-                # Run the model for the specified number of steps
-                for i in range(SIMULATION_STEPS):
-                    print(f"\n--- MODEL STEP {i} ---")
-                    model.step()
+                    model = SavingModel(
+                        population_composition=population_to_simulate,
+                        interest_rate=rate,
+                        sigma=sigma,
+                        wealth_dist=wealth_dist,
+                        num_wealth_points=NUM_WEALTH_POINTS,
+                        network='watts_strogatz', 
+                        network_params={'k': 4, 'p': 0.1},
+                        seed=seed,
+                        peer_comparison_active=settings["peer_comparison_active"],
+                        social_norm_active=settings["social_norm_active"],
+                        information_diffusion_active=settings["information_diffusion_active"],
+                        social_norm_strength=0.15,
+                        peer_comparison_strength=0.15,
+                        information_diffusion_strength=0.15,
+                        vfi_recalculation_interval=25,
+                        vfi_cache=precomputed_cache,
+                        verbose=VERBOSE
+                    )   
                     
-                print(f"\n--- Simulation Complete for R={rate}. Exporting data... ---")
+                    # Run the model for the specified number of steps
+                    for i in range(SIMULATION_STEPS):
+                        if VERBOSE:
+                            print(f"\n--- MODEL STEP {i} ---")
+                        model.step()
+                        
+                    print(f"\n--- Simulation Complete for R={rate}. Exporting data... ---")
 
-                # Retrieve and save data
-                agent_data = model.datacollector.get_agent_vars_dataframe()
-                model_data = model.datacollector.get_model_vars_dataframe()
-                
-                base_filename = f"run_{run_name}_R_{rate}_rep_{run_id + 1}_pop_{len(model.schedule.agents)}agents_steps_{SIMULATION_STEPS}"
-                agent_data_filepath = os.path.join(output_dir_csv, f"{base_filename}_agent_data.csv")
-                model_data_filepath = os.path.join(output_dir_csv, f"{base_filename}_model_data.csv")
-                
-                agent_data.to_csv(agent_data_filepath)
-                model_data.to_csv(model_data_filepath)
-                
-                print(f"Successfully saved Agent Data to: {agent_data_filepath}")
-                print(f"Successfully saved Model Data to: {model_data_filepath}")
+                    # Retrieve and save data
+                    agent_data = model.datacollector.get_agent_vars_dataframe()
+                    model_data = model.datacollector.get_model_vars_dataframe()
+                    
+                    base_filename = f"run_{run_name}_R_{rate}_rep_{run_id + 1}_pop_{len(model.schedule.agents)}agents_steps_{SIMULATION_STEPS}"
+                    agent_data_filepath = os.path.join(output_dir_csv, f"{base_filename}_agent_data.csv")
+                    model_data_filepath = os.path.join(output_dir_csv, f"{base_filename}_model_data.csv")
+                    
+                    agent_data.to_csv(agent_data_filepath)
+                    model_data.to_csv(model_data_filepath)
+                    
+                    print(f"Successfully saved Agent Data to: {agent_data_filepath}")
+                    print(f"Successfully saved Model Data to: {model_data_filepath}")
 
-                completed_runs += 1
-                progress_percent = (completed_runs / total_runs) * 100
-                elapsed_seconds = time.time() - start_time
-                elapsed_h = int(elapsed_seconds // 3600)
-                elapsed_m = int((elapsed_seconds % 3600) // 60)
-                elapsed_s = int(elapsed_seconds % 60)
-                time_str = f"{elapsed_h:02d}:{elapsed_m:02d}:{elapsed_s:02d}"
-                print(f"Overall Progress: [{completed_runs}/{total_runs}] {progress_percent:.1f}% Completed in {time_str}", end='\\r', file=sys.stderr)
-                
-                if run_name == "baseline": # Only save V/g on the first run to avoid redundancy
-                    print("--- Exporting V and g functions from cache... ---")
-                    output_dir_v_g = os.path.join(output_dir_csv, "v_g_functions")
-                    os.makedirs(output_dir_v_g, exist_ok=True)
-                    for profile_name, (V, g) in model.vfi_cache.items():
-                        v_g_base_filename = f"R_{rate}_{profile_name}"
-                        v_func_path = os.path.join(output_dir_v_g, f"{v_g_base_filename}_value_function.npy")
-                        g_func_path = os.path.join(output_dir_v_g, f"{v_g_base_filename}_policy_function.npy")
-                        np.save(v_func_path, V)
-                        np.save(g_func_path, g)
-                        print(f"  > Saved V and g for profile '{profile_name}'")
+                    completed_runs += 1
+                    progress_percent = (completed_runs / total_runs) * 100
+                    elapsed_seconds = time.time() - start_time
+                    elapsed_h = int(elapsed_seconds // 3600)
+                    elapsed_m = int((elapsed_seconds % 3600) // 60)
+                    elapsed_s = int(elapsed_seconds % 60)
+                    time_str = f"{elapsed_h:02d}:{elapsed_m:02d}:{elapsed_s:02d}"
+                    print(f"Overall Progress: [{completed_runs}/{total_runs}] {progress_percent:.1f}% Completed in {time_str}", end='\\r', file=sys.stderr)
+                    
+                    if run_name == "baseline": # Only save V/g on the first run to avoid redundancy
+                        print("--- Exporting V and g functions from cache... ---")
+                        output_dir_v_g = os.path.join(output_dir_csv, "v_g_functions")
+                        os.makedirs(output_dir_v_g, exist_ok=True)
+                        for profile_name, (V, g) in model.vfi_cache.items():
+                            v_g_base_filename = f"R_{rate}_{profile_name}"
+                            v_func_path = os.path.join(output_dir_v_g, f"{v_g_base_filename}_value_function.npy")
+                            g_func_path = os.path.join(output_dir_v_g, f"{v_g_base_filename}_policy_function.npy")
+                            np.save(v_func_path, V)
+                            np.save(g_func_path, g)
+                            print(f"  > Saved V and g for profile '{profile_name}'")
 
-    print("\n" + "="*50)
-    print("ALL SIMULATIONS COMPLETE. ALL DATA EXPORTED.")
-    print(f"Output files are in the '{output_dir_csv}' directory.")
-    print("="*50 + "\n")
+        print("\n" + "="*50)
+        print("ALL SIMULATIONS COMPLETE. ALL DATA EXPORTED.")
+        print(f"Output files are in the '{output_dir_csv}' directory.")
+        print("="*50 + "\n")
 
-# --- RESTORE STDOUT TO THE CONSOLE ---
-sys.stdout = original_stdout
+    # --- RESTORE STDOUT TO THE CONSOLE ---
+    sys.stdout = original_stdout
 
-print("Process finished successfully.")
-print(f"All data saved to '{output_dir_csv}'.")
-print(f"Full simulation log saved to '{log_filepath}'.")
+    print("Process finished successfully.")
+    print(f"All data saved to '{output_dir_csv}'.")
+    print(f"Full simulation log saved to '{log_filepath}'.")
