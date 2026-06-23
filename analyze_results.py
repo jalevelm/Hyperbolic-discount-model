@@ -473,10 +473,10 @@ def plot_wealth_by_profile(agent_data, rate):
         
     plt.subplots_adjust(top=0.90, hspace=0.3, wspace=0.2)
     
-    filename = f"Panel_Trayectorias_Perfiles_2x2_R_{rate}.png"
+    filename = f"Profile_trajectory_Panel_2x2_R_{rate}.png"
     fig.savefig(os.path.join(OUTPUT_DIR_PLOTS, filename), bbox_inches='tight', dpi=300)
     plt.close(fig)
-    print(f"  > Guardado Panel 2x2 de Trayectorias: {filename}")
+    print(f"  > Profile trajectory panel saved: {filename}")
 
 def plot_beta_by_profile(agent_data, rate):
     allowed_exps = ['baseline', 'social_norms_only', 'all_interactions']
@@ -694,11 +694,11 @@ def plot_composite_time_series(data, rate):
             axes[i].legend(title='Experiment', bbox_to_anchor=(1.01, 1), loc='upper left', frameon=False)
                 
     plt.subplots_adjust(hspace=0.3) 
-    filename = f'Panel_Agregados_Vertical_Wealth_Consumo_Gini_R_{rate}.png'
+    filename = f'Aggregate_Panel_Vertical_Wealth_Consumption_Gini_R_{rate}.png'
     
     fig.savefig(os.path.join(OUTPUT_DIR_PLOTS, filename), bbox_inches='tight', dpi=300)
     plt.close(fig)
-    print(f'  > Guardado Panel Vertical de Agregados: {filename}')
+    print(f'  > Vertical aggregate panel saved: {filename}')
 
 
 def plot_composite_distributions(agent_data, rate):
@@ -724,10 +724,10 @@ def plot_composite_distributions(agent_data, rate):
     
     plt.subplots_adjust(hspace=0.4) 
     
-    filename = f'Panel_Distribuciones_Vertical_Log_R_{rate}.png'
+    filename = f'Distributions_panel_Vertical_Log_R_{rate}.png'
     fig.savefig(os.path.join(OUTPUT_DIR_PLOTS, filename), bbox_inches='tight', dpi=300)
     plt.close(fig)
-    print(f'  > Guardado Panel Vertical de Distribuciones: {filename}')
+    print(f'  > Vertical distribution panel saved: {filename}')
 
 def plot_verification_barplots(rate):
     """

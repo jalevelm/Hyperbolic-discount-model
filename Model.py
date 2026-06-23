@@ -79,7 +79,7 @@ class SavingAgent(Agent):
             beta (float): Present bias parameter (0 < beta <= 1).
             delta (float): Discount factor (0 < delta < 1).
             init_wealth (float): Initial wealth of the agent.
-            sigma (float): Coefficient of relative risk aversion.
+            sigma (float): Inverse of the IES.
             borrowing_limit (float): Minimum allowed wealth level.
         """
         super().__init__(unique_id, model)  
@@ -562,7 +562,7 @@ class SavingModel(Model):
                 else:
                     init_wealth = self.random.randint(self.wealth_dist[-1][1][0], self.wealth_dist[-1][1][1])
 
-                agent_vfi_iterations = profile_params.get("vfi_iterations", 50)
+                agent_vfi_iterations = profile_params.get("vfi_iterations", 1000)
 
                 agent = SavingAgent(
                     unique_id=agent_id_counter,
